@@ -1,0 +1,200 @@
+/**
+ * Ingestão: espelha o banco JSON de api.louvorja.com.br no bucket R2, sob
+ * json_db/, reescrevendo as URLs de mídia para as chaves que existem no acervo.
+ *
+ * A lista de tabelas vem de /db/manifest, não de derivação a partir das
+ * categorias. Derivar deixava de fora tudo que não estivesse referenciado —
+ * 15 álbuns fora de categoria e a tabela pt_hymnal_1996 do hinário antigo, que
+ * o violin-app usa. O manifesto ainda traz o MD5 de cada arquivo, então uma
+ * reexecução só baixa o que mudou.
+ *
+ * O conteúdo vem do /db/bundle — um ZIP único com as 18.060 tabelas — em vez
+ * de uma requisição por tabela. São 28MB numa tacada contra 18.060 idas ao
+ * servidor de origem, que é instável.
+ *
+ *   node --env-file=.env --experimental-strip-types scripts/ingest.ts
+ *     [--force] [--only=<regex>] [--concurrency=8]
+ */
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fetchLegacy, pool } from './lib/legacy.ts'
+import * as r2 from './lib/r2.ts'
+
+const args = new Map(
+  process.argv.slice(2).map((a) => a.replace(/^--/, '').split('=') as [string, string]),
+)
+const CONCURRENCY = Number(args.get('concurrency') ?? 8)
+const FORCE = args.has('force')
+const ONLY = args.get('only') ? new RegExp(args.get('only') as string) : null
+
+const STATE_FILE = '.ingest-state.json'
+const MISSING_FILE = 'missing-media.txt'
+const NEW_API = 'https://api.louvorja.workers.dev'
+
+const encoder = new TextEncoder()
+const missingMedia = new Set<string>()
+let bucketKeys = new Set<string>()
+
+// ---------------------------------------------------------------- reescrita
+
+const URL_FIELDS = new Set(['url_music', 'url_instrumental_music', 'url_image'])
+
+/**
+ * O acervo é padronizado em .opus e .jpg; a origem devolve .mp3 e .bmp. A URL
+ * só é reescrita quando o alvo existe de fato no bucket — apontar para um
+ * arquivo ausente faria o JSON mentir. Se nem o normalizado nem o original
+ * existem, o alvo entra no relatório para o sync:media criá-lo.
+ */
+function rewriteUrl(url: unknown): unknown {
+  if (typeof url !== 'string' || url === '') return url
+
+  let normalized = url
+  if (normalized.toLowerCase().endsWith('.mp3')) normalized = `${normalized.slice(0, -4)}.opus`
+  else if (normalized.toLowerCase().endsWith('.bmp')) normalized = `${normalized.slice(0, -4)}.jpg`
+
+  const keyOf = (u: string) => (u.startsWith('/') ? u.slice(1) : u)
+  if (bucketKeys.has(keyOf(normalized))) return normalized
+  if (bucketKeys.has(keyOf(url))) return url
+
+  missingMedia.add(keyOf(normalized))
+  return normalized
+}
+
+function rewrite(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(rewrite)
+  if (node === null || typeof node !== 'object') return node
+  return Object.fromEntries(
+    Object.entries(node).map(([k, v]) => [k, URL_FIELDS.has(k) ? rewriteUrl(v) : rewrite(v)]),
+  )
+}
+
+// -------------------------------------------------------------------- meta
+
+async function ingestMeta() {
+  console.log('\n[meta] params, version_log, onlinevideos')
+
+  const res = await fetchLegacy('/params?type=json')
+  if (res.status === 200) {
+    const raw = JSON.parse(new TextDecoder().decode(res.body)) as Record<string, unknown>
+    // conn_ftp sai: o download por FTP foi substituído por HTTPS em /file.
+    const { conn_ftp: _drop, ...rest } = raw
+    const params = Object.fromEntries(
+      Object.entries(rest).map(([k, v]) => [
+        k,
+        String(v).replace(/https?:\/\/api\.louvorja\.com\.br/g, NEW_API),
+      ]),
+    )
+    await r2.put('meta/params.json', encoder.encode(JSON.stringify(params)), 'application/json')
+    console.log(`  params: ${Object.keys(params).length} chaves`)
+  }
+
+  for (const [path, key, type] of [
+    ['/version_log', 'meta/version_log.html', 'text/html; charset=UTF-8'],
+    ['/onlinevideos', 'meta/onlinevideos.txt', 'text/html; charset=UTF-8'],
+  ] as const) {
+    const r = await fetchLegacy(path)
+    if (r.status !== 200) {
+      console.warn(`  ${path} -> HTTP ${r.status}, pulado`)
+      continue
+    }
+    await r2.put(key, r.body, type)
+    console.log(`  ${path}: ${r.body.length} bytes`)
+  }
+}
+
+// --------------------------------------------------------------------- main
+
+type Entry = { file: string; table: string; path: string; hash: string }
+
+console.log('Lendo /db/manifest da origem...')
+const manifestRes = await fetchLegacy('/db/manifest')
+if (manifestRes.status !== 200) throw new Error(`manifest -> HTTP ${manifestRes.status}`)
+const manifest = JSON.parse(new TextDecoder().decode(manifestRes.body)) as Entry[]
+console.log(`  ${manifest.length} tabelas no manifesto`)
+
+console.log('Lendo chaves atuais do bucket para validar as mídias referenciadas...')
+bucketKeys = new Set(await r2.list())
+console.log(`  ${bucketKeys.size} objetos no bucket`)
+
+let state: Record<string, string> = {}
+if (!FORCE) {
+  try {
+    state = JSON.parse(readFileSync(STATE_FILE, 'utf8')) as Record<string, string>
+  } catch {
+    /* primeira execução */
+  }
+}
+
+await ingestMeta()
+
+const selected = manifest.filter((e) => !ONLY || ONLY.test(e.table))
+const todo = selected.filter((e) => FORCE || state[e.table] !== e.hash)
+console.log(
+  `\n[db] ${todo.length} tabelas a gravar` +
+    (ONLY ? ` | ${manifest.length - selected.length} fora do filtro` : '') +
+    (selected.length - todo.length > 0 ? ` | ${selected.length - todo.length} já em dia` : ''),
+)
+
+let saved = 0
+let failed = 0
+const workdir = mkdtempSync(join(tmpdir(), 'louvorja-db-'))
+
+if (todo.length > 0) {
+  console.log('  baixando /db/bundle...')
+  const bundle = await fetchLegacy('/db/bundle')
+  if (bundle.status !== 200) throw new Error(`bundle -> HTTP ${bundle.status}`)
+  const zipPath = join(workdir, 'bundle.zip')
+  writeFileSync(zipPath, bundle.body)
+  console.log(`  ${(bundle.body.length / 1048576).toFixed(1)}MB, extraindo...`)
+  execFileSync('unzip', ['-qq', '-o', zipPath, '-d', join(workdir, 'json')])
+
+  await pool(todo, CONCURRENCY, async (entry) => {
+    try {
+      const path = join(workdir, 'json', entry.file)
+      const body = JSON.stringify(rewrite(JSON.parse(readFileSync(path, 'utf8'))))
+      // Grava de volta: é este conteúdo, e não o da origem, que entra no bundle.
+      writeFileSync(path, body)
+      await r2.put(`json_db/${entry.table}.json`, encoder.encode(body), 'application/json')
+      state[entry.table] = entry.hash
+      if (++saved % 2000 === 0) console.log(`  ... ${saved}/${todo.length}`)
+    } catch (e) {
+      console.warn(`  FALHA ${entry.table}: ${(e as Error).message}`)
+      failed++
+    }
+  })
+
+  // Republica o bundle com os JSONs já reescritos, para /db/bundle sair desta
+  // API coerente com o que /json_db serve — o da origem ainda aponta .mp3.
+  const outZip = join(workdir, 'rewritten.zip')
+  execFileSync('zip', ['-qq', '-r', '-X', outZip, '.'], { cwd: join(workdir, 'json') })
+  const zipped = readFileSync(outZip)
+  await r2.put('meta/bundle.zip', zipped, 'application/zip')
+  console.log(`  meta/bundle.zip republicado (${(zipped.length / 1048576).toFixed(1)}MB)`)
+}
+
+writeFileSync(STATE_FILE, JSON.stringify(state))
+rmSync(workdir, { recursive: true, force: true })
+
+// O manifesto vai para o bucket com os paths apontando para esta API, para que
+// /db/manifest seja servido daqui sem depender da origem.
+await r2.put(
+  'meta/manifest.json',
+  encoder.encode(JSON.stringify(manifest.map((e) => ({ ...e, path: e.path })))),
+  'application/json',
+)
+
+console.log(`\n${saved} tabelas gravadas, ${failed} falharam`)
+
+if (missingMedia.size > 0) {
+  writeFileSync(MISSING_FILE, `${[...missingMedia].sort().join('\n')}\n`)
+  console.warn(
+    `\n${missingMedia.size} mídias referenciadas não existem no bucket.` +
+      `\nLista em ${MISSING_FILE} — "npm run sync:media" baixa e transcodifica.`,
+  )
+} else {
+  console.log('\nTodas as mídias referenciadas existem no bucket.')
+}
+
+export {}

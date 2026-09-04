@@ -1,0 +1,41 @@
+{
+  "name": "api-louvorja",
+  "version": "1.0.0",
+  "description": "API LouvorJA \u2014 substituta de api.louvorja.com.br em Cloudflare Workers",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "dev:remote": "wrangler dev --remote",
+    "deploy": "npm run type-check && wrangler deploy",
+    "type-check": "tsc --noEmit",
+    "types": "wrangler types",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "ingest": "node --env-file=.env --experimental-strip-types scripts/ingest.ts",
+    "covers": "node --env-file=.env --experimental-strip-types scripts/convert-covers.ts",
+    "parity": "node --env-file=.env --experimental-strip-types scripts/parity.ts",
+    "sync:media": "node --env-file=.env --experimental-strip-types scripts/sync-media.ts",
+    "bench": "node --env-file=.env --experimental-strip-types scripts/bench.ts",
+    "ingest:rest": "node --env-file=.env --experimental-strip-types scripts/ingest-rest.ts"
+  },
+  "dependencies": {
+    "hono": "^4.13.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.12",
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@types/node": "^26.4.1",
+    "aws4fetch": "^1.0.20",
+    "bmp-js": "^0.1.0",
+    "jpeg-js": "^0.4.4",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.4",
+    "wrangler": "^4.129.0"
+  }
+}

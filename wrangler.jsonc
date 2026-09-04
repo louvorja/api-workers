@@ -1,0 +1,49 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "api",
+  "main": "src/index.ts",
+  "account_id": "ebfd182d9bc3913163758a88118752f5",
+  "compatibility_date": "2026-08-22",
+
+  // Workers Caching (não o caches.default): faz read-through, colapsa
+  // requisições concorrentes para o mesmo objeto frio e fatia Range sozinho —
+  // ele remove o header Range antes de invocar o Worker, guarda o 200 inteiro e
+  // devolve o 206. cross_version_cache mantém o cache entre deploys porque o
+  // conteúdo é estático e não muda junto com o código.
+  // cross_version_cache fica FALSO (padrão) de propósito. Com max-age de um ano
+  // nas mídias, compartilhar o cache entre versões faria uma correção de
+  // comportamento continuar invisível por um ano nas URLs já aquecidas — foi o
+  // que aconteceu ao restringir os prefixos de /file. Cada deploy parte de um
+  // cache vazio; como o conteúdo é estático e os deploys são raros, a perda de
+  // hit rate é barata perto de servir resposta errada.
+  "cache": {
+    "enabled": true,
+    "cross_version_cache": false
+  },
+
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+
+  // Bucket único: mídia (covers/, images/, musics/) e o dump do banco
+  // estático sob json_db/. Ver scripts/ingest.ts.
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "files"
+    }
+  ],
+
+  // O Worker não usa segredo em runtime — o R2 vem por binding. Declarar a
+  // lista vazia impede o wrangler de injetar as chaves de ingestão do .env
+  // como variáveis do Worker durante o dev.
+  "secrets": { "required": [] },
+
+  "vars": {
+    // Espelha params.db_version da API legada. Entra no ETag/Cache-Control do
+    // /json_db para invalidar a borda quando o banco é regerado.
+    "DB_VERSION": "185",
+    "LEGACY_API_URL": "https://api.louvorja.com.br"
+  }
+}
