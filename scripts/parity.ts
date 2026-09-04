@@ -138,6 +138,179 @@ for (const path of ['version_log', 'onlinevideos']) {
 }
 
 /**
+ * Rotas públicas comparadas por CORPO, não por status.
+ *
+ * A auditoria anterior só olhava o código de resposta, e por isso deixou passar
+ * /{lang}/collections/online devolvendo o dump SQL de /onlinevideos em vez do
+ * JSON com { channels, playlists, videos }: os dois davam 200.
+ *
+ * As diferenças deliberadas ficam declaradas aqui, com o motivo — assim uma
+ * divergência nova nunca se esconde atrás de uma conhecida.
+ */
+type Isencao = {
+  motivo: string
+  /** Remove só o que difere de propósito; o resto continua tendo que bater. */
+  limpa?: (corpo: string) => string
+  /** Quando as respostas não são comparáveis de forma alguma. */
+  incomparavel?: boolean
+}
+
+/**
+ * Remove chaves na raiz e dentro de `data`, onde o REST as embrulha. Aceita
+ * nome exato ou prefixo terminado em `*`.
+ */
+const semChaves =
+  (...padroes: string[]) =>
+  (corpo: string) => {
+    const o = JSON.parse(corpo) as Record<string, unknown>
+    const casa = (k: string) =>
+      padroes.some((p) => (p.endsWith('*') ? k.startsWith(p.slice(0, -1)) : k === p))
+    for (const alvo of [o, o.data as Record<string, unknown> | undefined]) {
+      if (alvo && typeof alvo === 'object') {
+        for (const k of Object.keys(alvo)) if (casa(k)) delete alvo[k]
+      }
+    }
+    return JSON.stringify(o)
+  }
+
+const DELIBERADAS: Record<string, Isencao> = {
+  '/params': {
+    motivo: 'sem conn_ftp — o handshake FTP foi descontinuado',
+    limpa: semChaves('conn_ftp'),
+  },
+  '/pt/config': {
+    motivo:
+      'sem *_path_database (a origem expõe o caminho do banco); schedule:* ' +
+      'registra quando o cron da origem rodou e sempre deriva numa réplica',
+    limpa: semChaves('pt_path_database', 'es_path_database', 'schedule:*'),
+  },
+  '/es/config': {
+    motivo: 'sem *_path_database; schedule:* é o cron da origem',
+    limpa: semChaves('pt_path_database', 'es_path_database', 'schedule:*'),
+  },
+  '/health': { motivo: 'diagnóstico do próprio runtime', incomparavel: true },
+  '/version': { motivo: 'versão desta API, não do Lumen', incomparavel: true },
+  '/ftp': { motivo: 'responde 410; a origem tenta o handshake', incomparavel: true },
+  '/player': { motivo: 'o id do vídeo é validado antes de entrar no HTML', incomparavel: true },
+}
+DELIBERADAS['/pt/configs'] = DELIBERADAS['/pt/config'] as Isencao
+DELIBERADAS['/es/configs'] = DELIBERADAS['/es/config'] as Isencao
+
+const ROTAS_PUBLICAS = [
+  '/json_db',
+  '/json_db/config',
+  '/db/manifest',
+  '/db/config',
+  '/params',
+  '/params?type=env',
+  '/version_log',
+  '/onlinevideos',
+  '/metadata',
+  '/health',
+  '/version',
+  '/player',
+  '/ftp',
+  '/pt',
+  '/es',
+  '/pt/languages',
+  '/pt/config',
+  '/pt/configs',
+  '/pt/musics',
+  '/pt/musics/1',
+  '/pt/music/1',
+  '/pt/albums',
+  '/pt/albums/1',
+  '/pt/album/1',
+  '/pt/albums/category/aym',
+  '/pt/categories',
+  '/pt/categories/6/albums',
+  '/pt/categories/6/albums-with-musics',
+  '/pt/categories_albums',
+  '/pt/albums_musics',
+  '/pt/hymnal',
+  '/pt/hymnal/1728',
+  '/pt/lyrics',
+  '/pt/files',
+  '/pt/collections/online',
+  '/es/collections/online',
+  '/es/musics',
+  '/es/hymnal',
+] as const
+
+/** Neutraliza host e extensão de mídia, que mudam de propósito. */
+function neutraliza(texto: string): string {
+  return texto
+    .replace(/https?:\/\/api\.louvorja\.(workers\.dev|com\.br)/g, 'HOST')
+    .replace(/\.(mp3|opus)/g, '.AUDIO')
+    .replace(/\.(bmp|jpg)/g, '.IMG')
+}
+
+async function compararCorpo(rota: string) {
+  const [a, b] = await Promise.all([
+    fetch(`${NEW}${rota}`, { redirect: 'manual' }),
+    fetch(`${OLD}${rota}`, { headers: TOKEN ? { 'Api-Token': TOKEN } : {}, redirect: 'manual' }),
+  ])
+
+  const isencao = DELIBERADAS[rota.split('?')[0] as string]
+  if (isencao?.incomparavel) {
+    check(rota, a.status < 500, `esperado: ${isencao.motivo}`)
+    return
+  }
+
+  if (a.status >= 300 && a.status < 400) {
+    const same = a.headers.get('location') === b.headers.get('location')
+    check(
+      rota,
+      same && a.status === b.status,
+      `${a.headers.get('location')} vs ${b.headers.get('location')}`,
+    )
+    return
+  }
+
+  const tipoA = (a.headers.get('content-type') ?? '').split(';')[0]
+  const tipoB = (b.headers.get('content-type') ?? '').split(';')[0]
+  if (tipoA !== tipoB) {
+    check(rota, false, `content-type ${tipoA} vs ${tipoB}`)
+    return
+  }
+
+  const [ta, tb] = await Promise.all([a.text(), b.text()])
+  if (tipoA === 'application/json') {
+    let na: string
+    let nb: string
+    try {
+      const limpa = isencao?.limpa ?? ((x: string) => x)
+      na = neutraliza(limpa(JSON.stringify(JSON.parse(ta))))
+      nb = neutraliza(limpa(JSON.stringify(JSON.parse(tb))))
+    } catch {
+      check(rota, false, 'JSON inválido de um dos lados')
+      return
+    }
+    check(
+      rota,
+      na === nb,
+      na === nb ? '' : `corpo difere (${na.length} vs ${nb.length} bytes normalizados)`,
+    )
+    return
+  }
+  const semLinhas = (t: string) =>
+    isencao?.limpa === undefined
+      ? t
+      : t
+          .split('\n')
+          .filter((l) => !l.startsWith('conn_ftp='))
+          .join('\n')
+  check(
+    rota,
+    neutraliza(semLinhas(ta)) === neutraliza(semLinhas(tb)),
+    `texto difere (${ta.length} vs ${tb.length})`,
+  )
+}
+
+console.log('\nrotas públicas — comparação de corpo')
+for (const rota of ROTAS_PUBLICAS) await compararCorpo(rota)
+
+/**
  * Amostragem aleatória sobre os índices reais. Os 19 casos fixos acima provam
  * os contratos; isto procura o registro esquisito que só aparece em escala —
  * letra com caractere estranho, álbum sem capa, capítulo curto.

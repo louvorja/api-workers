@@ -166,12 +166,10 @@ rest.get('/:lang/categories/:id/albums', async (c) => {
 })
 
 rest.get('/:lang/collections/online', async (c) => {
-  const object = await c.env.FILES.get('meta/onlinevideos.txt')
-  if (object === null) return notFound(c)
-  const headers = new Headers(COMMON_HEADERS)
-  headers.set('Content-Type', 'text/html; charset=UTF-8')
-  headers.set('Cache-Control', CACHE)
-  return new Response(object.body, { headers })
+  const lang = c.req.param('lang') as string
+  if (!LANGS.has(lang)) return notFound(c)
+  const data = await load<unknown>(c, `${lang}_collections_online`)
+  return data === null ? notFound(c) : json(data)
 })
 
 for (const path of ['/download', '/:lang/download']) {

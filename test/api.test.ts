@@ -22,6 +22,11 @@ beforeAll(async () => {
   )
   await env.FILES.put('rest/pt_config.json', JSON.stringify({ version: '185' }))
   await env.FILES.put('rest/pt_music_7.json', JSON.stringify({ id_music: 7, lyric: [] }))
+  await env.FILES.put(
+    'rest/pt_collections_online.json',
+    JSON.stringify({ channels: [], playlists: [], videos: [] }),
+  )
+  await env.FILES.put('meta/onlinevideos.txt', 'DELETE FROM ONL_CANAIS|INSERT INTO ...')
 })
 
 describe('json_db', () => {
@@ -95,9 +100,16 @@ describe('params', () => {
     expect(await res.json()).toEqual({ db_version: '185', help: 'x' })
   })
 
-  it('devolve INI com type=env', async () => {
+  it('devolve INI com CRLF, como o parser Delphi espera', async () => {
     const res = await call('/params?type=env')
-    expect(await res.text()).toBe('db_version=185\nhelp=x\n')
+    expect(await res.text()).toBe('db_version=185\r\nhelp=x\r\n')
+  })
+
+  it('preserva o tipo dos valores no JSON', async () => {
+    await env.FILES.put('meta/params.json', JSON.stringify({ db_version: 185, help: 'x' }))
+    const body = (await (await call('/params')).json()) as Record<string, unknown>
+    expect(body.db_version).toBe(185)
+    expect(typeof body.db_version).toBe('number')
   })
 })
 
@@ -177,6 +189,16 @@ describe('REST', () => {
     expect((await call('/player')).status).toBe(200)
     expect((await call('/pt')).status).toBe(200)
     expect((await call('/xx')).status).toBe(404)
+  })
+
+  it('collections/online devolve JSON, não o dump SQL de /onlinevideos', async () => {
+    const res = await call('/pt/collections/online')
+    expect(res.headers.get('content-type')).toContain('application/json')
+    expect(await res.json()).toEqual({ channels: [], playlists: [], videos: [] })
+
+    // A rota antiga continua servindo o dump, que é outro formato.
+    const dump = await call('/onlinevideos')
+    expect(await dump.text()).toContain('ONL_CANAIS')
   })
 
   it('publica o openapi declarando as rotas', async () => {

@@ -185,6 +185,18 @@ for (const lang of LANGS) {
   ])
 
   jobs.push([
+    `${lang}/collections_online`,
+    async () => {
+      // Não é alias do /onlinevideos: aquele devolve o dump SQL do Delphi, este
+      // devolve { channels, playlists, videos } em JSON, e varia por idioma.
+      const res = await fetchLegacy(`/${lang}/collections/online`)
+      if (res.status !== 200) throw new Error(`HTTP ${res.status}`)
+      await save(`${lang}_collections_online`, JSON.parse(new TextDecoder().decode(res.body)))
+      console.log(`  ${lang}/collections_online: ${(res.body.length / 1048576).toFixed(1)}MB`)
+    },
+  ])
+
+  jobs.push([
     `${lang}/category_awm`,
     async () => {
       const cats = await read<Array<{ id_category: number }>>(`${lang}_categories`)

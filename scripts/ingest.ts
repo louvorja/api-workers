@@ -80,10 +80,12 @@ async function ingestMeta() {
     const raw = JSON.parse(new TextDecoder().decode(res.body)) as Record<string, unknown>
     // conn_ftp sai: o download por FTP foi substituído por HTTPS em /file.
     const { conn_ftp: _drop, ...rest } = raw
+    // Só string é reapontada. Coagir tudo com String() transformava valores
+    // numéricos como db_version=185 em "185", e o cliente compara com ===.
     const params = Object.fromEntries(
       Object.entries(rest).map(([k, v]) => [
         k,
-        String(v).replace(/https?:\/\/api\.louvorja\.com\.br/g, NEW_API),
+        typeof v === 'string' ? v.replace(/https?:\/\/api\.louvorja\.com\.br/g, NEW_API) : v,
       ]),
     )
     await r2.put('meta/params.json', encoder.encode(JSON.stringify(params)), 'application/json')
