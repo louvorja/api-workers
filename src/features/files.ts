@@ -17,6 +17,11 @@ function candidates(path: string): string[] {
   const lower = path.toLowerCase()
   if (lower.endsWith('.mp3')) return [`${path.slice(0, -4)}.opus`, path]
   if (lower.endsWith('.bmp')) return [`${path.slice(0, -4)}.jpg`, path]
+  // Caminho inverso: os JSONs pedem .opus, mas parte do acervo veio de fontes
+  // de 128 kbps, onde converter para Opus não economiza espaço e só acrescenta
+  // uma segunda geração de perda. Nessas faixas o MP3 original fica no bucket
+  // no lugar do .opus, e sem este fallback o pedido do banco daria 404.
+  if (lower.endsWith('.opus')) return [path, `${path.slice(0, -5)}.mp3`]
   return [path]
 }
 

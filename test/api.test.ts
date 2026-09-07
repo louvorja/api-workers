@@ -15,6 +15,7 @@ beforeAll(async () => {
   await env.FILES.put('meta/params.json', JSON.stringify({ db_version: '185', help: 'x' }))
   await env.FILES.put('covers/1992.jpg', new Uint8Array([1, 2, 3, 4, 5]))
   await env.FILES.put('musics/pt/A/B.opus', new Uint8Array(100))
+  await env.FILES.put('musics/pt/A/So Mp3.mp3', new Uint8Array(50))
 
   await env.FILES.put(
     'rest/pt_hymnal.json',
@@ -63,6 +64,18 @@ describe('file', () => {
 
   it('resolve .mp3 para o .opus do acervo', async () => {
     const res = await call('/file/musics/pt/A/B.mp3')
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('audio/ogg')
+  })
+
+  it('resolve .opus para o .mp3 quando a faixa não foi convertida', async () => {
+    const res = await call('/file/musics/pt/A/So Mp3.opus')
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('audio/mpeg')
+  })
+
+  it('prefere o .opus quando os dois existem', async () => {
+    const res = await call('/file/musics/pt/A/B.opus')
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toContain('audio/ogg')
   })
