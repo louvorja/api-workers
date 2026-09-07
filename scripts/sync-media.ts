@@ -2,10 +2,10 @@
  * Traz para o bucket as mídias que os JSONs referenciam mas que não existem
  * lá. Consome a lista que scripts/ingest.ts grava em missing-media.txt.
  *
- * O acervo é padronizado: áudio em Opus, imagem em JPEG. A origem só tem
- * MP3/BMP, então nada é copiado cru — o áudio é transcodificado para Opus com
- * bitrate escolhido pela fonte (ver BITRATE_LADDER) e o MP3 nunca chega ao
- * bucket, que já ocupa ~6GB.
+ * Imagem é padronizada em JPEG. Áudio depende da fonte: acima de 128k vale
+ * transcodificar para Opus (ver BITRATE_LADDER), porque o corte de tamanho
+ * não custa nada audível; de 128k para baixo o MP3 sobe como está, já que
+ * converter não economizaria espaço e somaria uma geração de perda.
  *
  *   node --env-file=.env --experimental-strip-types scripts/sync-media.ts
  */
@@ -35,11 +35,19 @@ const LIMIT = Number(args.get('limit') ?? 0)
  * porque o que o MP3 perdeu na primeira compressão não volta — um MP3 de 128
  * não justifica Opus acima de 80.
  */
+/**
+ * Abaixo deste bitrate a fonte vai para o bucket como está, em MP3.
+ *
+ * Converter 128k para Opus não economiza espaço — um Opus com qualidade
+ * equivalente ocupa o mesmo — e ainda empilha uma segunda geração de perda
+ * sobre um material que já tem artefatos. A escada antiga levava essas faixas
+ * a 80k, e a diferença é audível: é o que restou de pior no acervo.
+ */
+const MANTER_ORIGEM_ATE_KBPS = 128
+
+/** Só entra aqui fonte boa o bastante para o Opus cortar tamanho sem custo audível. */
 const BITRATE_LADDER: Array<[maxSourceKbps: number, targetKbps: number]> = [
-  [64, 48],
-  [96, 64],
-  [128, 80],
-  [160, 96],
+  [160, 112],
   [Number.POSITIVE_INFINITY, 128],
 ]
 
@@ -74,6 +82,18 @@ async function probeKbps(file: string): Promise<number> {
   const bps = Number(stdout.trim())
   // Sem bitrate declarado, assume o degrau mais alto: erra para o lado seguro.
   return Number.isFinite(bps) && bps > 0 ? bps / 1000 : 320
+}
+
+/** Bitrate nominal da fonte, sem convertê-la — decide se vale transcodificar. */
+async function probeBuffer(mp3: Uint8Array): Promise<number> {
+  const input = join(workdir, `${crypto.randomUUID()}.mp3`)
+  try {
+    writeFileSync(input, mp3)
+    const kbps = await probeKbps(input)
+    return MP3_RATES.reduce((best, r) => (Math.abs(r - kbps) < Math.abs(best - kbps) ? r : best))
+  } finally {
+    rmSync(input, { force: true })
+  }
 }
 
 async function toOpus(mp3: Uint8Array): Promise<{ body: Uint8Array; from: number; to: number }> {
@@ -175,12 +195,22 @@ await pool(pending, CONCURRENCY, async (key) => {
     if (lower.endsWith('.opus')) {
       const raw = await fetchOrigin(key, 'mp3')
       if (!raw) return void failed.push(key)
-      const { body, from, to } = await toOpus(raw)
-      await r2.put(key, body, 'audio/ogg')
-      bytes += body.length
-      console.log(
-        `  ${key} — mp3 ${from}k (${(raw.length / 1024) | 0}KB) -> opus ${to}k (${(body.length / 1024) | 0}KB)`,
-      )
+      const origem = await probeBuffer(raw)
+      if (origem <= MANTER_ORIGEM_ATE_KBPS) {
+        // A API resolve .opus para .mp3 quando o Opus não existe, então o JSON
+        // continua apontando .opus e o desktop acha o arquivo do mesmo jeito.
+        const chaveMp3 = `${key.slice(0, -5)}.mp3`
+        await r2.put(chaveMp3, raw, 'audio/mpeg')
+        bytes += raw.length
+        console.log(`  ${chaveMp3} — mp3 ${Math.round(origem)}k mantido (converter pioraria)`)
+      } else {
+        const { body, from, to } = await toOpus(raw)
+        await r2.put(key, body, 'audio/ogg')
+        bytes += body.length
+        console.log(
+          `  ${key} — mp3 ${from}k (${(raw.length / 1024) | 0}KB) -> opus ${to}k (${(body.length / 1024) | 0}KB)`,
+        )
+      }
     } else if (lower.endsWith('.jpg')) {
       const raw = await fetchJpeg(key)
       if (!raw) return void failed.push(key)
