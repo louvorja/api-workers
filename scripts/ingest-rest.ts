@@ -36,9 +36,10 @@ const COLLECTIONS = [
 ] as const
 
 const encoder = new TextEncoder()
-const bucketKeys = new Set(await r2.list('musics/'))
-for (const k of await r2.list('images/')) bucketKeys.add(k)
-for (const k of await r2.list('covers/')) bucketKeys.add(k)
+const bucketObjects = await r2.listWithSizes('musics/')
+for (const [k, v] of await r2.listWithSizes('images/')) bucketObjects.set(k, v)
+for (const [k, v] of await r2.listWithSizes('covers/')) bucketObjects.set(k, v)
+const bucketKeys = new Set(bucketObjects.keys())
 
 /**
  * O REST devolve URL absoluta apontando para a origem. Aqui ela passa a
@@ -63,12 +64,31 @@ const URL_FIELDS = new Set(['url', 'url_image', 'url_music', 'url_instrumental_m
 function rewrite(node: unknown): unknown {
   if (Array.isArray(node)) return node.map(rewrite)
   if (node === null || typeof node !== 'object') return node
-  return Object.fromEntries(
+  const out = Object.fromEntries(
     Object.entries(node).map(([k, v]) => [
       k,
       URL_FIELDS.has(k) && typeof v === 'string' ? rewriteUrl(v) : rewrite(v),
     ]),
   )
+  return corrigirTamanho(out)
+}
+
+/**
+ * O `size` da origem descreve o arquivo dela (.mp3/.bmp), mas a `url` passa a
+ * apontar a chave do acervo — que pode ser outro arquivo, de outro tamanho.
+ * O desktop compara `tamanho local >= size` para decidir se o download está
+ * íntegro, então o registro precisa falar do arquivo que a API entrega; do
+ * contrário toda faixa parece danificada e é rebaixada a cada verificação.
+ */
+function corrigirTamanho(row: Record<string, unknown>): Record<string, unknown> {
+  const url = row.url
+  if (typeof url !== 'string' || typeof row.size !== 'number') return row
+
+  const prefixo = `${NEW_API}/file/`
+  if (!url.startsWith(prefixo)) return row
+
+  const real = bucketObjects.get(url.slice(prefixo.length))
+  return real === undefined || real === row.size ? row : { ...row, size: real }
 }
 
 type Page = { data: unknown[]; total: number; last_page: number; current_page: number }

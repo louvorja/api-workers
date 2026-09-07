@@ -31,7 +31,16 @@ export async function get(key: string): Promise<Uint8Array | null> {
 
 /** Lista todas as chaves do bucket sob um prefixo, paginando os 1000 por página do S3. */
 export async function list(prefix = ''): Promise<string[]> {
-  const keys: string[] = []
+  return [...(await listWithSizes(prefix)).keys()]
+}
+
+/**
+ * Chaves e tamanhos sob um prefixo. O `<Size>` já vem no mesmo `<Contents>` da
+ * listagem, então sai de graça — e é o que permite ao snapshot declarar o
+ * tamanho do arquivo que o acervo tem de fato, e não o da origem legada.
+ */
+export async function listWithSizes(prefix = ''): Promise<Map<string, number>> {
+  const objetos = new Map<string, number>()
   let token: string | undefined
 
   do {
@@ -42,13 +51,16 @@ export async function list(prefix = ''): Promise<string[]> {
     if (!res.ok) throw new Error(`LIST -> ${res.status}`)
     const xml = await res.text()
 
-    for (const m of xml.matchAll(/<Key>([\s\S]*?)<\/Key>/g)) {
-      keys.push(decodeXml(m[1] as string))
+    for (const m of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
+      const bloco = m[1] as string
+      const chave = /<Key>([\s\S]*?)<\/Key>/.exec(bloco)?.[1]
+      const tamanho = /<Size>(\d+)<\/Size>/.exec(bloco)?.[1]
+      if (chave) objetos.set(decodeXml(chave), Number(tamanho ?? 0))
     }
     token = /<NextContinuationToken>([\s\S]*?)<\/NextContinuationToken>/.exec(xml)?.[1]?.trim()
   } while (token)
 
-  return keys
+  return objetos
 }
 
 function decodeXml(s: string): string {
