@@ -39,7 +39,11 @@ jobs:
       # A origem corta em 5.000 por janela. Espaçar globalmente é o que evita a
       # cascata de 429 — ver o comentário em scripts/lib/legacy.ts.
       LEGACY_MIN_INTERVAL_MS: "250"
-      LEGACY_MAX_REQUESTS: "4000"
+      # Teto contra laço desgovernado, não contra a janela da origem (disso o
+      # throttle já cuida, dormindo até o reset). O ciclo diário incremental
+      # gasta dezenas de requisições; a reconciliação completa passa de 8.900,
+      # então o teto sobe junto com ela — senão ela falharia sozinha.
+      LEGACY_MAX_REQUESTS: ${{ (inputs.full_rest || inputs.force) && '12000' || '4000' }}
 
     steps:
       - uses: actions/checkout@v5
