@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fetchLegacy, pool } from './lib/legacy.ts'
 import * as r2 from './lib/r2.ts'
+import * as pipeline from './lib/state.ts'
 
 const args = new Map(
   process.argv.slice(2).map((a) => a.replace(/^--/, '').split('=') as [string, string]),
@@ -29,8 +30,8 @@ const CONCURRENCY = Number(args.get('concurrency') ?? 8)
 const FORCE = args.has('force')
 const ONLY = args.get('only') ? new RegExp(args.get('only') as string) : null
 
-const STATE_FILE = '.ingest-state.json'
 const MISSING_FILE = 'missing-media.txt'
+const REPORT_FILE = 'ingest-report.json'
 const NEW_API = 'https://api.louvorja.workers.dev'
 
 const encoder = new TextEncoder()
@@ -120,14 +121,10 @@ console.log('Lendo chaves atuais do bucket para validar as mídias referenciadas
 bucketKeys = new Set(await r2.list())
 console.log(`  ${bucketKeys.size} objetos no bucket`)
 
-let state: Record<string, string> = {}
-if (!FORCE) {
-  try {
-    state = JSON.parse(readFileSync(STATE_FILE, 'utf8')) as Record<string, string>
-  } catch {
-    /* primeira execução */
-  }
-}
+const estado = await pipeline.load()
+// --force reprocessa, mas não esquece: zerar o mapa aqui faria um
+// `--force --only=X` apagar o hash das outras 18.059 tabelas ao salvar no fim.
+const state: Record<string, string> = { ...estado.tables }
 
 await ingestMeta()
 
@@ -138,6 +135,18 @@ console.log(
     (ONLY ? ` | ${manifest.length - selected.length} fora do filtro` : '') +
     (selected.length - todo.length > 0 ? ` | ${selected.length - todo.length} já em dia` : ''),
 )
+
+/**
+ * Reescrever metade do catálogo de uma vez não é atualização: ou o estado se
+ * perdeu, ou a origem re-hasheou tudo. Nos dois casos o certo é alguém olhar
+ * antes, porque a alternativa é publicar 18.060 tabelas sem revisão.
+ */
+if (!FORCE && !ONLY && todo.length > selected.length * 0.5 && Object.keys(state).length > 0) {
+  throw new Error(
+    `${todo.length} de ${selected.length} tabelas mudariam — grande demais para uma execução ` +
+      'automática. Rode com --force se for mesmo o caso.',
+  )
+}
 
 let saved = 0
 let failed = 0
@@ -176,7 +185,7 @@ if (todo.length > 0) {
   console.log(`  meta/bundle.zip republicado (${(zipped.length / 1048576).toFixed(1)}MB)`)
 }
 
-writeFileSync(STATE_FILE, JSON.stringify(state))
+await pipeline.save({ ...estado, tables: state })
 rmSync(workdir, { recursive: true, force: true })
 
 // O manifesto vai para o bucket com os paths apontando para esta API, para que
@@ -189,8 +198,21 @@ await r2.put(
 
 console.log(`\n${saved} tabelas gravadas, ${failed} falharam`)
 
+// Gravado sempre, inclusive vazio: sobrar a lista da execução anterior faria o
+// sync-media perseguir mídia que já entrou.
+writeFileSync(MISSING_FILE, missingMedia.size > 0 ? `${[...missingMedia].sort().join('\n')}\n` : '')
+
+writeFileSync(
+  REPORT_FILE,
+  JSON.stringify({
+    changed: todo.map((e) => e.table),
+    saved,
+    failed,
+    missing: [...missingMedia].sort(),
+  }),
+)
+
 if (missingMedia.size > 0) {
-  writeFileSync(MISSING_FILE, `${[...missingMedia].sort().join('\n')}\n`)
   console.warn(
     `\n${missingMedia.size} mídias referenciadas não existem no bucket.` +
       `\nLista em ${MISSING_FILE} — "npm run sync:media" baixa e transcodifica.`,

@@ -11,3 +11,5 @@ dist/
 coverage/
 missing-media.txt
 .ingest-state.json
+ingest-report.json
+media-report.json

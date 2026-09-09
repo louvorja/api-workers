@@ -6,20 +6,46 @@
  * arquivos). Como não dá para derivá-las dos JSONs, cada coleção é copiada
  * inteira e guardada em rest/, e o Worker pagina em cima disso.
  *
- * A origem trava per_page em 15, então coleção grande custa muitas páginas —
- * é um custo de uma vez só, e depois o resync é incremental pelo /db/manifest.
+ * A origem trava per_page em 15, então coleção grande custa muitas páginas: uma
+ * passada completa são ~8.900 requisições contra um limite de 5.000 por janela.
+ * Por isso o padrão é incremental — `--changed` recebe o relatório do ingest e
+ * só reprocessa o que mudou de hash no /db/manifest. `--full` faz a passada
+ * inteira, para reconciliar de tempos em tempos.
  *
  *   node --env-file=.env --experimental-strip-types scripts/ingest-rest.ts
- *     [--only=<regex>] [--concurrency=8]
+ *     [--changed=ingest-report.json] [--full] [--only=<regex>] [--concurrency=3]
  */
+import { readFileSync } from 'node:fs'
 import { fetchLegacy, pool } from './lib/legacy.ts'
 import * as r2 from './lib/r2.ts'
 
 const args = new Map(
   process.argv.slice(2).map((a) => a.replace(/^--/, '').split('=') as [string, string]),
 )
-const CONCURRENCY = Number(args.get('concurrency') ?? 8)
+// 3, não 8: a origem estrangula. Ver o espaçamento global em lib/legacy.ts.
+const CONCURRENCY = Number(args.get('concurrency') ?? 3)
 const ONLY = args.get('only') ? new RegExp(args.get('only') as string) : null
+const FULL = args.has('full')
+
+/** Tabelas que mudaram de hash nesta rodada do ingest, do relatório dele. */
+const changedTables = new Set<string>()
+const changedArg = args.get('changed')
+if (changedArg && !FULL) {
+  try {
+    const rel = JSON.parse(readFileSync(changedArg, 'utf8')) as { changed?: string[] }
+    for (const t of rel.changed ?? []) changedTables.add(t)
+  } catch (e) {
+    throw new Error(`não consegui ler ${changedArg}: ${(e as Error).message}`)
+  }
+}
+/** Sem --changed e sem --full, não há como saber o que mudou: roda tudo. */
+const INCREMENTAL = Boolean(changedArg) && !FULL
+
+const idsMudados = (prefixo: 'music' | 'album'): number[] =>
+  [...changedTables]
+    .map((t) => new RegExp(`^${prefixo}_(\\d+)$`).exec(t)?.[1])
+    .filter((v): v is string => Boolean(v))
+    .map(Number)
 
 const NEW_API = 'https://api.louvorja.workers.dev'
 const OLD_API = 'https://api.louvorja.com.br'
@@ -117,6 +143,46 @@ async function fetchAll(path: string): Promise<unknown[]> {
   return rows.flat().filter((r) => r !== undefined)
 }
 
+/**
+ * Busca só a cauda de uma coleção append-only.
+ *
+ * `lyrics` e `files` não têm tabela 1:1 no /db/manifest, então não dá para saber
+ * pelo hash se mudaram — e são justamente as caras (~4.400 páginas somadas).
+ * Como crescem por id no fim, comparar o `total` da página 1 com o tamanho do
+ * snapshot diz quantas páginas novas existem: 2 requisições no caso parado.
+ *
+ * Qualquer sinal de que a coleção não cresceu monotonicamente (encolheu, ou não
+ * há snapshot) cai para a passada inteira — barato de errar para o lado seguro.
+ */
+async function fetchTail(path: string, key: string): Promise<unknown[]> {
+  let snapshot: unknown[]
+  try {
+    snapshot = await read<unknown[]>(key)
+  } catch {
+    return fetchAll(path)
+  }
+  if (!Array.isArray(snapshot) || snapshot.length === 0) return fetchAll(path)
+
+  const first = await fetchPage(path, 1)
+  const perPage = first.data.length || 15
+  if (first.total < snapshot.length) return fetchAll(path)
+  if (first.total === snapshot.length) return snapshot
+
+  // Recomeça na página que contém o primeiro registro novo, para não cortar
+  // uma página no meio nem confiar em índice fora de fronteira.
+  const startPage = Math.max(1, Math.floor(snapshot.length / perPage) + 1)
+  const pages = Array.from({ length: first.last_page - startPage + 1 }, (_, i) => i + startPage)
+  const rows: unknown[][] = []
+  rows.length = pages.length
+  await pool(pages, CONCURRENCY, async (p) => {
+    rows[p - startPage] = p === 1 ? first.data : (await fetchPage(path, p)).data
+  })
+
+  return [...snapshot.slice(0, (startPage - 1) * perPage), ...rows.flat()].filter(
+    (r) => r !== undefined,
+  )
+}
+
 async function save(key: string, data: unknown) {
   await r2.put(
     `rest/${key}.json`,
@@ -127,17 +193,46 @@ async function save(key: string, data: unknown) {
 
 // --------------------------------------------------------------------- main
 
-const jobs: Array<[name: string, run: () => Promise<void>]> = []
+const jobs: Array<[name: string, run: () => Promise<void>, roda?: () => boolean]> = []
+
+const mudou = (t: string) => changedTables.has(t)
+const algumMudou = (re: RegExp) => [...changedTables].some((t) => re.test(t))
+const musicaMudou = () => algumMudou(/^music_\d+$/)
+const albumMudou = () => algumMudou(/^album_\d+$/)
+
+/**
+ * Nem toda coleção REST tem tabela 1:1 no /db/manifest — existem `pt_musics`,
+ * `pt_categories` e `pt_hymnal`, mas não `pt_albums` nem `pt_files`. Onde falta,
+ * o gatilho é a tabela de item correspondente (`album_N`, `music_N`).
+ *
+ * `lyrics` e `files` ficam fora deste mapa de propósito: são as caras, e o
+ * fetchTail já as torna baratas o bastante para rodar sempre.
+ */
+const GATILHO: Record<string, (lang: string) => boolean> = {
+  musics: (l) => mudou(`${l}_musics`) || musicaMudou(),
+  categories: (l) => mudou(`${l}_categories`),
+  hymnal: (l) => mudou(`${l}_hymnal`),
+  albums: () => albumMudou(),
+  albums_musics: () => musicaMudou() || albumMudou(),
+  categories_albums: (l) => mudou(`${l}_categories`) || albumMudou(),
+}
+
+/** Coleções sem tabela de referência, buscadas pela cauda. */
+const APPEND_ONLY = new Set(['lyrics', 'files'])
 
 for (const lang of LANGS) {
   for (const col of COLLECTIONS) {
+    const porCauda = APPEND_ONLY.has(col)
     jobs.push([
       `${lang}/${col}`,
       async () => {
-        const rows = await fetchAll(`/${lang}/${col}`)
+        const rows = porCauda
+          ? await fetchTail(`/${lang}/${col}`, `${lang}_${col}`)
+          : await fetchAll(`/${lang}/${col}`)
         await save(`${lang}_${col}`, rows)
         console.log(`  ${lang}/${col}: ${rows.length} registros`)
       },
+      porCauda ? undefined : () => GATILHO[col]?.(lang) ?? true,
     ])
   }
   jobs.push([
@@ -154,6 +249,7 @@ for (const lang of LANGS) {
       await save(`${lang}_config`, clean)
       console.log(`  ${lang}/config: ${Object.keys(clean).length} chaves`)
     },
+    () => mudou('config'),
   ])
   jobs.push([
     `${lang}/languages`,
@@ -175,33 +271,42 @@ for (const lang of LANGS) {
   jobs.push([
     `${lang}/music_items`,
     async () => {
-      const musics = await read<Array<{ id_music: number }>>(`${lang}_musics`)
+      // No incremental só os ids que mudaram de hash. As tabelas de item não
+      // têm idioma (`music_1`, não `pt_music_1`), então cada id é tentado nos
+      // dois — o que não pertence a este idioma devolve não-200 e é ignorado.
+      const ids = INCREMENTAL
+        ? idsMudados('music')
+        : (await read<Array<{ id_music: number }>>(`${lang}_musics`)).map((m) => m.id_music)
       let n = 0
-      await pool(musics, CONCURRENCY, async (m) => {
-        const res = await fetchLegacy(`/${lang}/musics/${m.id_music}`)
+      await pool(ids, CONCURRENCY, async (id) => {
+        const res = await fetchLegacy(`/${lang}/musics/${id}`)
         if (res.status !== 200) return
         const body = JSON.parse(new TextDecoder().decode(res.body)) as { data: unknown }
-        await save(`${lang}_music_${m.id_music}`, body.data)
+        await save(`${lang}_music_${id}`, body.data)
         n++
       })
       console.log(`  ${lang}/music_items: ${n} músicas`)
     },
+    () => musicaMudou(),
   ])
 
   jobs.push([
     `${lang}/album_items`,
     async () => {
-      const albums = await read<Array<{ id_album: number }>>(`${lang}_albums`)
+      const ids = INCREMENTAL
+        ? idsMudados('album')
+        : (await read<Array<{ id_album: number }>>(`${lang}_albums`)).map((a) => a.id_album)
       let n = 0
-      await pool(albums, CONCURRENCY, async (a) => {
-        const res = await fetchLegacy(`/${lang}/albums/${a.id_album}`)
+      await pool(ids, CONCURRENCY, async (id) => {
+        const res = await fetchLegacy(`/${lang}/albums/${id}`)
         if (res.status !== 200) return
         const body = JSON.parse(new TextDecoder().decode(res.body)) as { data: unknown }
-        await save(`${lang}_album_${a.id_album}`, body.data)
+        await save(`${lang}_album_${id}`, body.data)
         n++
       })
       console.log(`  ${lang}/album_items: ${n} álbuns`)
     },
+    () => albumMudou(),
   ])
 
   jobs.push([
@@ -230,6 +335,7 @@ for (const lang of LANGS) {
       }
       console.log(`  ${lang}/category_awm: ${cats.length} categorias`)
     },
+    () => mudou(`${lang}_categories`) || albumMudou() || musicaMudou(),
   ])
 
   jobs.push([
@@ -244,6 +350,7 @@ for (const lang of LANGS) {
       }
       console.log(`  ${lang}/category_albums: ${cats.length} categorias`)
     },
+    () => mudou(`${lang}_categories`) || albumMudou(),
   ])
 }
 
@@ -256,8 +363,15 @@ jobs.push([
   },
 ])
 
-const selected = jobs.filter(([name]) => !ONLY || ONLY.test(name))
-console.log(`Snapshot REST — ${selected.length} coleções\n`)
+const noFiltro = jobs.filter(([name]) => !ONLY || ONLY.test(name))
+const selected = INCREMENTAL ? noFiltro.filter(([, , roda]) => (roda ? roda() : true)) : noFiltro
+
+console.log(
+  INCREMENTAL
+    ? `Snapshot REST incremental — ${selected.length} de ${noFiltro.length} coleções ` +
+        `(${changedTables.size} tabelas mudaram)\n`
+    : `Snapshot REST completo — ${selected.length} coleções\n`,
+)
 
 let failed = 0
 for (const [name, run] of selected) {
@@ -270,5 +384,6 @@ for (const [name, run] of selected) {
 }
 
 console.log(`\n${selected.length - failed} ok, ${failed} falharam`)
+if (failed > 0) process.exitCode = 1
 
 export {}

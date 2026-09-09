@@ -8,12 +8,41 @@ const TOKEN = process.env.LEGACY_API_TOKEN ?? ''
  */
 let pauseUntil = 0
 
+/**
+ * Espaçamento mínimo GLOBAL entre requisições.
+ *
+ * Reagir ao x-ratelimit-remaining não basta: o saldo só é lido depois da
+ * resposta, então N workers disparam juntos antes de qualquer um saber que o
+ * saldo acabou. Uma corrida com concorrência 8 tomou 214 respostas 429 e 137
+ * timeouts em 2.000 requisições; com espaçamento e concorrência 3, 351
+ * requisições passaram sem uma única falha. O relógio é compartilhado — cada
+ * chamada reserva a próxima fatia antes de sair.
+ */
+const MIN_INTERVAL_MS = Number(process.env.LEGACY_MIN_INTERVAL_MS ?? 250)
+let nextSlot = 0
+
+/**
+ * Teto de requisições por execução. A origem corta em 5.000 por janela; estourar
+ * não degrada, derruba o lote inteiro em 429. Melhor parar sabendo onde parou.
+ */
+const MAX_REQUESTS = Number(process.env.LEGACY_MAX_REQUESTS ?? 0)
+let feitas = 0
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 async function throttle() {
-  const wait = pauseUntil - Date.now()
-  if (wait > 0) await sleep(wait)
+  if (MAX_REQUESTS > 0 && ++feitas > MAX_REQUESTS) {
+    throw new Error(`teto de ${MAX_REQUESTS} requisições à origem atingido nesta execução`)
+  }
+  const agora = Date.now()
+  const slot = Math.max(nextSlot, agora)
+  nextSlot = slot + MIN_INTERVAL_MS
+  const espera = Math.max(slot - agora, pauseUntil - agora)
+  if (espera > 0) await sleep(espera)
 }
+
+/** Quantas requisições esta execução já gastou. */
+export const requisicoesFeitas = () => feitas
 
 function observe(res: Response) {
   const remaining = Number(res.headers.get('x-ratelimit-remaining'))

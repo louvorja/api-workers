@@ -23,8 +23,19 @@ const run = promisify(execFile)
 const args = new Map(
   process.argv.slice(2).map((a) => a.replace(/^--/, '').split('=') as [string, string]),
 )
-const CONCURRENCY = Number(args.get('concurrency') ?? 10)
+// 3, não 10: a origem estrangula. Ver o comentário do espaçamento em lib/legacy.ts.
+const CONCURRENCY = Number(args.get('concurrency') ?? 3)
 const LIMIT = Number(args.get('limit') ?? 0)
+const REPORT_FILE = 'media-report.json'
+
+type ItemRelatorio = {
+  key: string
+  kind: 'opus' | 'mp3' | 'jpeg' | 'raw'
+  sourceKbps?: number
+  targetKbps?: number
+  bytes: number
+}
+const relatorio: ItemRelatorio[] = []
 
 /**
  * Bitrate Opus por bitrate da fonte, validado por ABX.
@@ -173,10 +184,15 @@ try {
 }
 
 // Pula o que já foi para o bucket, para a execução ser retomável.
+// `covers/` entra aqui junto: o ingest lista capa faltante em missing-media.txt
+// pelo mesmo caminho das outras mídias, e sem este prefixo toda capa já
+// publicada era rebaixada e reenviada a cada execução.
 const present = new Set(await r2.list('musics/'))
 for (const k of await r2.list('images/')) present.add(k)
+for (const k of await r2.list('covers/')) present.add(k)
 const pending = keys.filter((k) => !present.has(k))
 const jaNoBucket = keys.length - pending.length
+const totalPendente = pending.length
 if (LIMIT > 0) pending.length = Math.min(pending.length, LIMIT)
 
 console.log(
@@ -202,11 +218,18 @@ await pool(pending, CONCURRENCY, async (key) => {
         const chaveMp3 = `${key.slice(0, -5)}.mp3`
         await r2.put(chaveMp3, raw, 'audio/mpeg')
         bytes += raw.length
+        relatorio.push({
+          key: chaveMp3,
+          kind: 'mp3',
+          sourceKbps: Math.round(origem),
+          bytes: raw.length,
+        })
         console.log(`  ${chaveMp3} — mp3 ${Math.round(origem)}k mantido (converter pioraria)`)
       } else {
         const { body, from, to } = await toOpus(raw)
         await r2.put(key, body, 'audio/ogg')
         bytes += body.length
+        relatorio.push({ key, kind: 'opus', sourceKbps: from, targetKbps: to, bytes: body.length })
         console.log(
           `  ${key} — mp3 ${from}k (${(raw.length / 1024) | 0}KB) -> opus ${to}k (${(body.length / 1024) | 0}KB)`,
         )
@@ -217,13 +240,18 @@ await pool(pending, CONCURRENCY, async (key) => {
       const isBmp = raw[0] === 0x42 && raw[1] === 0x4d
       const body = isBmp ? toJpeg(raw) : raw
       await r2.put(key, body, 'image/jpeg')
+      // Instalação antiga tem a URL .bmp em cache local; sem o original no
+      // bucket, /file/covers/X.bmp passa a dar 404 para ela.
+      if (isBmp) await r2.put(`${key.slice(0, -4)}.bmp`, raw, 'image/bmp')
       bytes += body.length
+      relatorio.push({ key, kind: 'jpeg', bytes: body.length })
       console.log(`  ${key} — ${(body.length / 1024) | 0}KB`)
     } else {
       const res = await fetchLegacy(`/file/${encodePath(key)}`)
       if (res.status !== 200) return void failed.push(key)
       await r2.put(key, res.body, 'application/octet-stream')
       bytes += res.body.length
+      relatorio.push({ key, kind: 'raw', bytes: res.body.length })
       console.log(`  ${key} — ${(res.body.length / 1024) | 0}KB`)
     }
     ok++
@@ -235,8 +263,17 @@ await pool(pending, CONCURRENCY, async (key) => {
 
 rmSync(workdir, { recursive: true, force: true })
 
+// O que o teto por execução deixou para trás volta no próximo ciclo: o gate lê
+// isso e força execução mesmo com a origem parada.
+const restante = totalPendente - ok
+writeFileSync(
+  REPORT_FILE,
+  JSON.stringify({ itens: relatorio, bytes, failed, pending: restante, limit: LIMIT }),
+)
+
 console.log(
-  `\n${ok} adicionadas (${(bytes / 1024 / 1024).toFixed(1)}MB), ${failed.length} indisponíveis`,
+  `\n${ok} adicionadas (${(bytes / 1024 / 1024).toFixed(1)}MB), ${failed.length} indisponíveis` +
+    (restante > 0 ? `, ${restante} para o próximo ciclo` : ''),
 )
 for (const f of failed.slice(0, 20)) console.log(`  - ${f}`)
 if (failed.length > 20) console.log(`  ... e mais ${failed.length - 20}`)

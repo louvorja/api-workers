@@ -173,11 +173,37 @@ const semChaves =
     return JSON.stringify(o)
   }
 
+/**
+ * Remove campos de cada item de `data` quando ele é uma lista. O `semChaves`
+ * acima só alcança a raiz e o `data` objeto; nas coleções o registro está
+ * dentro do array.
+ */
+const semCamposDosItens =
+  (...campos: string[]) =>
+  (corpo: string) => {
+    const o = JSON.parse(corpo) as { data?: unknown }
+    if (Array.isArray(o.data)) {
+      for (const item of o.data) {
+        if (item && typeof item === 'object') {
+          for (const c of campos) delete (item as Record<string, unknown>)[c]
+        }
+      }
+    }
+    return JSON.stringify(o)
+  }
+
+const SIZE_DIVERGE =
+  'o `size` descreve o arquivo que esta API entrega (.opus/.jpg), não o da ' +
+  'origem (.mp3/.bmp) — o desktop usa esse número para julgar integridade, e ' +
+  'repetir o da origem marcaria todo download como corrompido (ver ingest-rest.ts)'
+
 const DELIBERADAS: Record<string, Isencao> = {
   '/params': {
     motivo: 'sem conn_ftp — o handshake FTP foi descontinuado',
     limpa: semChaves('conn_ftp'),
   },
+  '/pt/files': { motivo: SIZE_DIVERGE, limpa: semCamposDosItens('size') },
+  '/es/files': { motivo: SIZE_DIVERGE, limpa: semCamposDosItens('size') },
   '/pt/config': {
     motivo:
       'sem *_path_database (a origem expõe o caminho do banco); schedule:* ' +

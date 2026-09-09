@@ -1,49 +1,108 @@
 name: Ingestão do catálogo
 
-# O ingest espelha o banco JSON da origem legada no R2 e republica
-# meta/bundle.zip. Não roda no Cron Trigger do Worker: são 18.060 escritas no
-# R2 por execução (o limite é 1.000 subrequests), 28MB de bundle contra 128MB
-# de memória, e os binários zip/unzip. Aqui tem tempo, banda e disco.
+# Mantém a API em dia sozinha: catálogo, mídia nova (com a regra de bitrate) e
+# capas. Não roda no Cloudflare porque a conta está no plano Free — transcodificar
+# exige ffmpeg, e a única via de binário nativo lá é Containers, que é do Paid.
 on:
   schedule:
     - cron: "0 7 * * *" # 04:00 em São Paulo
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Ignora o gate e o estado (reprocessa tudo)"
+        type: boolean
+        default: false
+      full_rest:
+        description: "Snapshot REST completo em vez de incremental"
+        type: boolean
+        default: false
 
 # Duas ingestões simultâneas escreveriam as mesmas chaves no bucket.
 concurrency:
   group: ingest
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   ingest:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
+    timeout-minutes: 120
+    env:
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      LEGACY_API_URL: ${{ vars.LEGACY_API_URL || 'https://api.louvorja.com.br' }}
+      LEGACY_API_TOKEN: ${{ secrets.LEGACY_API_TOKEN }}
+      # A origem corta em 5.000 por janela. Espaçar globalmente é o que evita a
+      # cascata de 429 — ver o comentário em scripts/lib/legacy.ts.
+      LEGACY_MIN_INTERVAL_MS: "250"
+      LEGACY_MAX_REQUESTS: "4000"
 
-      - uses: actions/setup-node@v4
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
 
       - run: npm ci
 
-      # Sem o estado, toda execução regrava as 18.060 tabelas em vez de só o
-      # que mudou de hash na origem. Perder o cache não quebra nada — só torna
-      # a execução seguinte completa.
-      - name: Restaura estado da ingestão
-        uses: actions/cache@v4
-        with:
-          path: .ingest-state.json
-          key: ingest-state-${{ github.run_id }}
-          restore-keys: ingest-state-
+      - name: ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
-      - name: Ingestão
+      # /db/config custa 188 bytes e diz se a origem mudou. Sem isso, o dia
+      # parado custaria os 28MB do bundle.
+      - name: Gate
+        id: gate
+        run: node --experimental-strip-types scripts/gate.ts ${{ inputs.force && '--force' || '' }}
+
+      - name: Catálogo
+        if: steps.gate.outputs.changed == 'true'
+        run: node --experimental-strip-types scripts/ingest.ts ${{ inputs.force && '--force' || '' }}
+
+      # Teto por execução: lote gigante não entra em produção de uma vez, e o
+      # que sobrar volta amanhã pelo media_pending.
+      - name: Mídia nova
+        if: steps.gate.outputs.changed == 'true'
+        run: node --experimental-strip-types scripts/sync-media.ts --limit=150
+
+      - name: Capas remanescentes
+        if: steps.gate.outputs.changed == 'true'
+        run: node --experimental-strip-types scripts/convert-covers.ts
+
+      # Precisa vir DEPOIS da mídia: o snapshot REST publica o tamanho real do
+      # arquivo no bucket, e o desktop usa esse número para decidir se o download
+      # está íntegro. Rodar antes marcaria as faixas novas como corrompidas.
+      - name: Snapshot REST
+        if: steps.gate.outputs.changed == 'true'
+        run: |
+          node --experimental-strip-types scripts/ingest-rest.ts \
+            ${{ inputs.full_rest && '--full' || '--changed=ingest-report.json' }}
+
+      # !cancelled() para o resumo sair também quando uma etapa falhou — é
+      # justamente aí que alguém precisa ficar sabendo.
+      - name: Resumo
+        if: "!cancelled() && steps.gate.outputs.changed == 'true'"
         env:
-          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
-          R2_BUCKET: ${{ secrets.R2_BUCKET }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          LEGACY_API_URL: ${{ vars.LEGACY_API_URL || 'https://api.louvorja.com.br' }}
-          LEGACY_API_TOKEN: ${{ secrets.LEGACY_API_TOKEN }}
-        run: node --experimental-strip-types scripts/ingest.ts
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          node --experimental-strip-types scripts/report.ts \
+            --version=${{ steps.gate.outputs.version }} \
+            --version-number=${{ steps.gate.outputs.version_number }} \
+            ${{ job.status == 'success' && ' ' || '--failed' }}
+
+      - name: Relatórios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorios
+          path: |
+            ingest-report.json
+            media-report.json
+            missing-media.txt
+          if-no-files-found: ignore
