@@ -20,6 +20,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fetchLegacy, pool } from './lib/legacy.ts'
+import { mediaPath, normalizedMediaPath } from './lib/media.ts'
 import * as r2 from './lib/r2.ts'
 import * as pipeline from './lib/state.ts'
 
@@ -51,16 +52,14 @@ const URL_FIELDS = new Set(['url_music', 'url_instrumental_music', 'url_image'])
 function rewriteUrl(url: unknown): unknown {
   if (typeof url !== 'string' || url === '') return url
 
-  let normalized = url
-  if (normalized.toLowerCase().endsWith('.mp3')) normalized = `${normalized.slice(0, -4)}.opus`
-  else if (normalized.toLowerCase().endsWith('.bmp')) normalized = `${normalized.slice(0, -4)}.jpg`
+  const original = mediaPath(url)
+  const normalized = normalizedMediaPath(url)
+  if (!original || !normalized) return url
+  if (bucketKeys.has(normalized)) return `/${normalized}`
+  if (bucketKeys.has(original)) return `/${original}`
 
-  const keyOf = (u: string) => (u.startsWith('/') ? u.slice(1) : u)
-  if (bucketKeys.has(keyOf(normalized))) return normalized
-  if (bucketKeys.has(keyOf(url))) return url
-
-  missingMedia.add(keyOf(normalized))
-  return normalized
+  missingMedia.add(normalized)
+  return `/${normalized}`
 }
 
 function rewrite(node: unknown): unknown {

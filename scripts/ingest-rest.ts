@@ -17,6 +17,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { fetchLegacy, pool } from './lib/legacy.ts'
+import { mediaPath, normalizedMediaPath } from './lib/media.ts'
 import * as r2 from './lib/r2.ts'
 
 const args = new Map(
@@ -73,16 +74,15 @@ const bucketKeys = new Set(bucketObjects.keys())
  * .jpg) — mesma regra do ingest do json_db.
  */
 function rewriteUrl(value: string): string {
-  let out = value.replace(OLD_API, NEW_API)
-  const path = out.startsWith(`${NEW_API}/file/`) ? out.slice(`${NEW_API}/file/`.length) : null
-  if (path === null) return out
-
-  let normalized = path
-  if (normalized.toLowerCase().endsWith('.mp3')) normalized = `${normalized.slice(0, -4)}.opus`
-  else if (normalized.toLowerCase().endsWith('.bmp')) normalized = `${normalized.slice(0, -4)}.jpg`
-
-  if (bucketKeys.has(normalized)) out = `${NEW_API}/file/${normalized}`
-  return out
+  const original = mediaPath(value)
+  const normalized = normalizedMediaPath(value)
+  if (!original || !normalized) return value.replace(OLD_API, NEW_API)
+  const key = bucketKeys.has(normalized)
+    ? normalized
+    : bucketKeys.has(original)
+      ? original
+      : normalized
+  return `${NEW_API}/file/${key}`
 }
 
 const URL_FIELDS = new Set(['url', 'url_image', 'url_music', 'url_instrumental_music'])
