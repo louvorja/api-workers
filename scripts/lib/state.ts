@@ -18,6 +18,8 @@ export type PipelineState = {
   /** `version` do /db/config da origem na última execução que fechou inteira. */
   version: number
   version_number: number
+  /** Fingerprint do /db/manifest, para detectar mudanças sem bump de version. */
+  manifest_hash: string
   /** tabela -> hash MD5 do /db/manifest. */
   tables: Record<string, string>
   /** Mídias que faltaram por causa do teto por execução, a retomar no próximo ciclo. */
@@ -28,6 +30,7 @@ export type PipelineState = {
 const VAZIO: PipelineState = {
   version: 0,
   version_number: 0,
+  manifest_hash: '',
   tables: {},
   media_pending: 0,
   last_run: null,

@@ -20,6 +20,7 @@ const args = new Map(
 )
 const VERSION = Number(args.get('version') ?? 0)
 const VERSION_NUMBER = Number(args.get('version-number') ?? 0)
+const MANIFEST_HASH = args.get('manifest-hash') ?? ''
 const FALHOU = args.has('failed')
 
 type IngestReport = { changed: string[]; saved: number; failed: number; missing: string[] }
@@ -142,6 +143,7 @@ if (!FALHOU && VERSION) {
     ...estado,
     version: VERSION,
     version_number: VERSION_NUMBER,
+    manifest_hash: MANIFEST_HASH,
     media_pending: media.pending,
   })
   console.log(`Estado atualizado: version ${VERSION}, ${media.pending} mídias pendentes`)
