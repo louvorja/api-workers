@@ -34,6 +34,9 @@ describe('json_db', () => {
   it('serve um arquivo existente', async () => {
     const res = await call('/json_db/config')
     expect(res.status).toBe(200)
+    expect(res.headers.get('cache-control')).toBe(
+      'public, max-age=86400, stale-while-revalidate=604800',
+    )
     expect(await res.json()).toEqual({ version_number: 185 })
   })
 
