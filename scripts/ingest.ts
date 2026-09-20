@@ -16,7 +16,15 @@
  *     [--force] [--only=<regex>] [--concurrency=8]
  */
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fetchLegacy, pool } from './lib/legacy.ts'
@@ -151,7 +159,12 @@ let saved = 0
 let failed = 0
 const workdir = mkdtempSync(join(tmpdir(), 'louvorja-db-'))
 
-if (todo.length > 0) {
+// O app depende deste ZIP. Sem ele no bucket (primeira execução depois de
+// publicar a rota), esperar uma tabela mudar deixaria /db/bible-bundle em 404.
+// Os capítulos não têm URL de mídia, então o conteúdo da origem já é o final.
+const bibleBundleMissing = !bucketKeys.has('meta/bible-bundle.zip')
+
+if (todo.length > 0 || bibleBundleMissing) {
   console.log('  baixando /db/bundle...')
   const bundle = await fetchLegacy('/db/bundle')
   if (bundle.status !== 200) throw new Error(`bundle -> HTTP ${bundle.status}`)
@@ -175,13 +188,36 @@ if (todo.length > 0) {
     }
   })
 
+  // A Bíblia tem milhares de arquivos pequenos. O app baixa este ZIP uma vez
+  // ao abrir uma tela bíblica, em vez de abrir uma requisição por capítulo.
+  const bibleSourceDir = join(workdir, 'json')
+  const bibleBundleDir = join(workdir, 'bible-bundle')
+  const bibleFiles = readdirSync(bibleSourceDir).filter((file) =>
+    /^bible_\d+_\d+_\d+\.json$/.test(file),
+  )
+  if (bibleFiles.length === 0) throw new Error('bundle não trouxe capítulos bíblicos')
+  mkdirSync(bibleBundleDir)
+  for (const file of bibleFiles) {
+    copyFileSync(join(bibleSourceDir, file), join(bibleBundleDir, file))
+  }
+  const bibleZip = join(workdir, 'bible-bundle.zip')
+  execFileSync('zip', ['-qq', '-r', '-X', bibleZip, '.'], { cwd: bibleBundleDir })
+  const bibleZipped = readFileSync(bibleZip)
+  await r2.put('meta/bible-bundle.zip', bibleZipped, 'application/zip')
+  console.log(
+    `  meta/bible-bundle.zip republicado (${(bibleZipped.length / 1048576).toFixed(1)}MB, ${bibleFiles.length} capítulos)`,
+  )
+
   // Republica o bundle com os JSONs já reescritos, para /db/bundle sair desta
-  // API coerente com o que /json_db serve — o da origem ainda aponta .mp3.
-  const outZip = join(workdir, 'rewritten.zip')
-  execFileSync('zip', ['-qq', '-r', '-X', outZip, '.'], { cwd: join(workdir, 'json') })
-  const zipped = readFileSync(outZip)
-  await r2.put('meta/bundle.zip', zipped, 'application/zip')
-  console.log(`  meta/bundle.zip republicado (${(zipped.length / 1048576).toFixed(1)}MB)`)
+  // API coerente com o que /json_db serve — o da origem ainda aponta .mp3. Sem
+  // tabela alterada os JSONs aqui são os da origem, então não se republica.
+  if (todo.length > 0) {
+    const outZip = join(workdir, 'rewritten.zip')
+    execFileSync('zip', ['-qq', '-r', '-X', outZip, '.'], { cwd: join(workdir, 'json') })
+    const zipped = readFileSync(outZip)
+    await r2.put('meta/bundle.zip', zipped, 'application/zip')
+    console.log(`  meta/bundle.zip republicado (${(zipped.length / 1048576).toFixed(1)}MB)`)
+  }
 }
 
 await pipeline.save({ ...estado, tables: state })

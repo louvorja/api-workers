@@ -19,6 +19,13 @@ db.on(['GET', 'HEAD'], '/db/manifest', async (c) => {
   return res ?? notFound(c)
 })
 
+// Bundle somente dos capítulos bíblicos. As telas bíblicas baixam esse ZIP sob
+// demanda, sem trazer catálogo, músicas e outros dados do banco.
+db.on(['GET', 'HEAD'], '/db/bible-bundle', async (c) => {
+  const res = await serveObject(c.env.FILES, 'meta/bible-bundle.zip', c.req.raw, CACHE)
+  return res ?? notFound(c)
+})
+
 // Precisa vir antes de /db/:key, senão o curinga tenta ler json_db/bundle.json.
 db.on(['GET', 'HEAD'], '/db/bundle', async (c) => {
   const res = await serveObject(c.env.FILES, 'meta/bundle.zip', c.req.raw, CACHE)

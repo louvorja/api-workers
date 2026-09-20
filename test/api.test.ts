@@ -12,6 +12,7 @@ const call = async (path: string, init?: RequestInit) => {
 beforeAll(async () => {
   await env.FILES.put('json_db/config.json', JSON.stringify({ version_number: 185 }))
   await env.FILES.put('json_db/music_1.json', JSON.stringify({ id_music: 1 }))
+  await env.FILES.put('meta/bible-bundle.zip', new Uint8Array([80, 75, 3, 4]))
   await env.FILES.put('meta/params.json', JSON.stringify({ db_version: '185', help: 'x' }))
   await env.FILES.put('covers/1992.jpg', new Uint8Array([1, 2, 3, 4, 5]))
   await env.FILES.put('musics/pt/A/B.opus', new Uint8Array(100))
@@ -55,6 +56,14 @@ describe('json_db', () => {
   it('marca o 404 como no-store para não envenenar a borda', async () => {
     const res = await call('/json_db/nao_existe')
     expect(res.headers.get('cache-control')).toBe('no-store')
+  })
+})
+
+describe('bundles', () => {
+  it('serve o bundle bíblico separado do banco completo', async () => {
+    const res = await call('/db/bible-bundle')
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('application/zip')
   })
 })
 
