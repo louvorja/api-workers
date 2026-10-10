@@ -19,9 +19,9 @@ export const COMMON_HEADERS: Record<string, string> = {
 }
 
 /**
- * /auth e /admin recebem escrita do painel, que roda em outra origem: o
- * preflight precisa liberar POST, PUT e DELETE. E nada ali pode ir para o cache
- * — a resposta depende de quem está autenticado.
+ * /auth, /admin e /tasks recebem operações do painel, que roda em outra origem:
+ * o preflight precisa liberar todos os métodos usados ali. E nada nesses
+ * prefixos pode ir para o cache — a resposta depende de quem está autenticado.
  */
 export const PRIVATE_HEADERS: Record<string, string> = {
   ...COMMON_HEADERS,
@@ -30,7 +30,11 @@ export const PRIVATE_HEADERS: Record<string, string> = {
 }
 
 export const isPrivatePath = (path: string) =>
-  path.startsWith('/auth/') || path === '/admin' || path.startsWith('/admin/')
+  path.startsWith('/auth/') ||
+  path === '/admin' ||
+  path.startsWith('/admin/') ||
+  path === '/tasks' ||
+  path.startsWith('/tasks/')
 
 /**
  * 404 no formato da API legada, sem vazar o caminho interno como o original

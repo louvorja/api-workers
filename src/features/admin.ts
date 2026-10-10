@@ -644,7 +644,26 @@ export const filesSpec = (base: string): ListSpec => ({
 })
 
 admin.get('/admin/files', async (c) => {
-  return c.json(await paginate(c.env.DB, filesSpec(filesBase(c)), new URL(c.req.url)))
+  const url = new URL(c.req.url)
+  const rawAlbum = url.searchParams.get('id_album')
+  const pre: Where[] = []
+  if (rawAlbum !== null) {
+    // O controller PHP converte id_album para inteiro antes das cinco
+    // subconsultas. O grupo preserva a intenção dos orWhereRaw da origem e faz
+    // os demais filtros de Data::data valerem para todos os arquivos do álbum.
+    const numeric = rawAlbum.trimStart().match(/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?/i)
+    const album = numeric ? Math.trunc(Number(numeric[0])) : 0
+    pre.push({
+      sql:
+        '(files.id_file IN (SELECT albums.id_file_image FROM albums WHERE albums.id_album = ?) ' +
+        'OR files.id_file IN (SELECT musics.id_file_music FROM musics JOIN albums_musics ON albums_musics.id_music = musics.id_music WHERE albums_musics.id_album = ?) ' +
+        'OR files.id_file IN (SELECT musics.id_file_instrumental_music FROM musics JOIN albums_musics ON albums_musics.id_music = musics.id_music WHERE albums_musics.id_album = ?) ' +
+        'OR files.id_file IN (SELECT lyrics.id_file_image FROM lyrics JOIN albums_musics ON albums_musics.id_music = lyrics.id_music WHERE albums_musics.id_album = ?) ' +
+        'OR files.id_file IN (SELECT musics.id_file_image FROM musics JOIN albums_musics ON albums_musics.id_music = musics.id_music WHERE albums_musics.id_album = ?))',
+      params: [album, album, album, album, album],
+    })
+  }
+  return c.json(await paginate(c.env.DB, filesSpec(filesBase(c)), url, pre))
 })
 
 admin.get('/admin/files/:id', async (c) => {

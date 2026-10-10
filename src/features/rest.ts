@@ -1,11 +1,16 @@
 import { type Context, Hono } from 'hono'
 import { COMMON_HEADERS, notFound } from '../lib/http.ts'
 import { paginate } from '../lib/paginate.ts'
+import { foldText } from '../lib/sql.ts'
 import type { App } from '../types.ts'
 
 const LANGS = new Set(['pt', 'es'])
 const ID_RE = /^\d+$/
+// Uma hora no cliente e na borda. Cada resposta sem cache é uma requisição a
+// mais na cota diária do plano gratuito, e o catálogo muda poucas vezes por dia.
 const CACHE = 'public, max-age=3600, stale-while-revalidate=86400'
+/** Teto de registros de download por dia: mantém a escrita no D1 previsível. */
+const DOWNLOAD_LOGS_PER_DAY = 500
 
 export const rest = new Hono<App>()
 
@@ -24,39 +29,503 @@ async function load<T>(c: Context<App>, key: string): Promise<T | null> {
 
 type Row = Record<string, unknown>
 
-/** Coleções servidas direto do snapshot, paginadas no formato Laravel. */
-const COLLECTIONS: Record<string, string> = {
-  musics: 'musics',
-  albums: 'albums',
-  categories: 'categories',
-  hymnal: 'hymnal',
-  lyrics: 'lyrics',
-  files: 'files',
-  albums_musics: 'albums_musics',
-  categories_albums: 'categories_albums',
-  languages: 'languages',
+type Collection = {
+  fields: string[]
+  text: Set<string>
 }
 
-rest.get('/health', () =>
-  json(
+const collection = (fields: string[], text: string[]): Collection => ({
+  fields,
+  text: new Set(text),
+})
+
+/**
+ * Campos aceitos por Data::data em cada controller PHP. A ordem também é a da
+ * origem: ela importa quando um cliente combina filtros `or:` e filtros AND.
+ */
+const COLLECTIONS: Record<string, Collection> = {
+  languages: collection(['id_language', 'language'], ['id_language', 'language']),
+  musics: collection(
+    [
+      'id_music',
+      'name',
+      'id_file_image',
+      'url_image',
+      'image_version',
+      'id_file_music',
+      'url_music',
+      'music_version',
+      'id_file_instrumental_music',
+      'url_instrumental_music',
+      'instrumental_music_version',
+      'id_language',
+      'created_at',
+      'updated_at',
+    ],
+    ['name', 'url_image', 'url_music', 'url_instrumental_music', 'id_language'],
+  ),
+  categories: collection(
+    ['id_category', 'name', 'slug', 'order', 'type', 'id_language'],
+    ['name', 'slug', 'type', 'id_language'],
+  ),
+  categories_albums: collection(
+    [
+      'id_category_album',
+      'id_category',
+      'category_name',
+      'id_album',
+      'album_name',
+      'name',
+      'order',
+      'id_language',
+    ],
+    ['category_name', 'album_name', 'name', 'id_language'],
+  ),
+  albums: collection(
+    [
+      'id_album',
+      'name',
+      'id_file_image',
+      'url_image',
+      'image_version',
+      'id_language',
+      'color',
+      'subtitle',
+      'order',
+      'created_at',
+      'updated_at',
+    ],
+    ['name', 'url_image', 'id_language', 'color', 'subtitle'],
+  ),
+  albums_musics: collection(
+    ['id_album_music', 'id_music', 'music_name', 'id_album', 'album_name', 'track', 'id_language'],
+    ['music_name', 'album_name', 'id_language'],
+  ),
+  lyrics: collection(
+    [
+      'id_lyric',
+      'id_music',
+      'music',
+      'lyric',
+      'aux_lyric',
+      'id_file_image',
+      'time',
+      'instrumental_time',
+      'show_slide',
+      'order',
+      'id_language',
+    ],
+    ['music', 'lyric', 'aux_lyric', 'time', 'instrumental_time', 'id_language'],
+  ),
+  hymnal: collection(
+    [
+      'id_music',
+      'name',
+      'track',
+      'id_file_image',
+      'url_image',
+      'image_version',
+      'id_file_music',
+      'url_music',
+      'music_version',
+      'id_file_instrumental_music',
+      'url_instrumental_music',
+      'instrumental_music_version',
+      'id_language',
+      'created_at',
+      'updated_at',
+    ],
+    ['name', 'url_image', 'url_music', 'url_instrumental_music', 'id_language'],
+  ),
+  files: collection(
+    [
+      'id_file',
+      'name',
+      'type',
+      'size',
+      'host',
+      'dir',
+      'file_name',
+      'image_position',
+      'duration',
+      'version',
+    ],
+    ['name', 'type', 'host', 'dir', 'file_name', 'duration'],
+  ),
+}
+
+type Filter = { field: string; like: boolean; or: boolean; value: unknown }
+
+/** Mesmo pequeno protocolo de filtros de Data::whereExplode na API PHP. */
+function filterOf(field: string, raw: string): Filter {
+  const colon = raw.indexOf(':')
+  if (colon === -1) {
+    return {
+      field,
+      like: false,
+      or: false,
+      value: raw === 'true' ? true : raw === 'false' ? false : raw,
+    }
+  }
+
+  const op = raw.slice(0, colon)
+  const rest = raw.slice(colon + 1)
+  if (op === 'like' || op === 'orlike') {
+    const pattern = rest.replaceAll('*', '%')
+    return {
+      field,
+      like: true,
+      or: op === 'orlike',
+      value: pattern === 'true' ? true : pattern === 'false' ? false : pattern,
+    }
+  }
+  if (op === 'or') {
+    return {
+      field,
+      like: false,
+      or: true,
+      value: rest === 'true' ? true : rest === 'false' ? false : rest,
+    }
+  }
+  return { field, like: false, or: false, value: raw }
+}
+
+function like(value: unknown, pattern: string): boolean {
+  if (value === null || value === undefined) return false
+  const input = [...foldText(String(value))]
+  const wildcard = [...foldText(pattern)]
+  let previous = Array<boolean>(input.length + 1).fill(false)
+  previous[0] = true
+
+  // LIKE sem regex evita backtracking caro em letras grandes e padrões hostis.
+  for (const token of wildcard) {
+    const current = Array<boolean>(input.length + 1).fill(false)
+    if (token === '%') current[0] = previous[0] ?? false
+    for (let i = 1; i <= input.length; i++) {
+      current[i] =
+        token === '%'
+          ? (previous[i] ?? false) || (current[i - 1] ?? false)
+          : (token === '_' || token === input[i - 1]) && (previous[i - 1] ?? false)
+    }
+    previous = current
+  }
+  return previous[input.length] ?? false
+}
+
+function equal(value: unknown, expected: unknown, text: boolean): boolean {
+  if (value === null || value === undefined) return false
+  const right = typeof expected === 'boolean' ? (expected ? 1 : 0) : expected
+  if (text || typeof value === 'string') return foldText(String(value)) === foldText(String(right))
+
+  const leftNumber = Number(value)
+  const rightNumber = Number(right)
+  return Number.isFinite(leftNumber) && Number.isFinite(rightNumber)
+    ? leftNumber === rightNumber
+    : String(value) === String(right)
+}
+
+function fieldValue(row: Row, collectionName: string, field: string, url: URL): unknown {
+  // `host` existia no MySQL, mas no D1 foi normalizado para a origem de /file.
+  if (collectionName === 'files' && field === 'host') return row.host ?? `${url.origin}/file`
+  return row[field]
+}
+
+function filterRows(rows: Row[], name: string, spec: Collection, url: URL): Row[] {
+  const filters = spec.fields.flatMap((field) => {
+    const raw = url.searchParams.get(field)
+    return raw === null ? [] : [filterOf(field, raw)]
+  })
+  if (filters.length === 0) return rows
+
+  return rows.filter((row) => {
+    // SQL dá precedência a AND. Cada `or:` abre um novo grupo de ANDs.
+    let anyGroup = false
+    let group: boolean | undefined
+    for (const filter of filters) {
+      const value = fieldValue(row, name, filter.field, url)
+      const matches = filter.like
+        ? like(
+            value,
+            String(typeof filter.value === 'boolean' ? Number(filter.value) : filter.value),
+          )
+        : equal(value, filter.value, spec.text.has(filter.field))
+      if (group === undefined) group = matches
+      else if (filter.or) {
+        anyGroup ||= group
+        group = matches
+      } else group &&= matches
+    }
+    return anyGroup || group === true
+  })
+}
+
+function compare(a: unknown, b: unknown, text: boolean): number {
+  if (a === b) return 0
+  if (a === null || a === undefined) return -1
+  if (b === null || b === undefined) return 1
+  if (!text && typeof a === 'number' && typeof b === 'number') return a - b
+  const left = foldText(String(a))
+  const right = foldText(String(b))
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
+function sortRows(rows: Row[], name: string, spec: Collection, url: URL): Row[] {
+  const available = new Set(rows.flatMap((row) => Object.keys(row)))
+  if (name === 'files') available.add('host')
+  const sorts = (url.searchParams.get('sort_by') ?? '').split(',').flatMap((item) => {
+    const [field, direction = 'asc'] = item.split('.')
+    return field && available.has(field)
+      ? [{ field, desc: direction.toLowerCase() === 'desc', text: spec.text.has(field) }]
+      : []
+  })
+  if (sorts.length === 0) return rows
+
+  return [...rows].sort((left, right) => {
+    for (const sort of sorts) {
+      const result = compare(
+        fieldValue(left, name, sort.field, url),
+        fieldValue(right, name, sort.field, url),
+        sort.text,
+      )
+      if (result !== 0) return sort.desc ? -result : result
+    }
+    return 0
+  })
+}
+
+function pageSize(url: URL): number {
+  const limit = Math.trunc(Number(url.searchParams.get('limit')))
+  if (!Number.isFinite(limit) || limit === 0) return 15
+  return limit < 0 ? 9999 : limit
+}
+
+function phpInteger(raw: string): number {
+  const numeric = raw.trimStart().match(/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?/i)
+  if (!numeric) return 0
+  const value = Number(numeric[0])
+  if (Number.isFinite(value)) return Math.trunc(value)
+  return value < 0 ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER
+}
+
+/** Um texto só casa com coluna inteira no SQLite quando é um número bem formado. */
+function sqliteInteger(raw: string): number | null {
+  const text = raw.trim()
+  if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(text)) return null
+  const value = Number(text)
+  return Number.isInteger(value) ? value : null
+}
+
+const snapshot = async (c: Context<App>, lang: string, name: string): Promise<Row[]> =>
+  (await load<Row[]>(c, `${lang}_${name}`)) ?? []
+
+const byId = (rows: Row[], key: string) =>
+  [...rows].sort((left, right) => Number(left[key]) - Number(right[key]))
+
+/**
+ * Filtros relacionais que não podem ser calculados só com uma linha do snapshot.
+ *
+ * Saem dos outros snapshots do mesmo idioma, nunca do D1: as rotas públicas não
+ * têm autenticação, e uma consulta ao banco por chamada deixaria a cota diária
+ * de leitura na mão de qualquer um.
+ */
+async function relationalRows(
+  c: Context<App>,
+  lang: string,
+  name: string,
+  rows: Row[],
+  url: URL,
+): Promise<Row[]> {
+  const album = url.searchParams.get('id_album')
+  if (album !== null && (name === 'musics' || name === 'lyrics')) {
+    const albumId = sqliteInteger(album)
+    if (albumId === null) return []
+    const ids = new Set(
+      (await snapshot(c, lang, 'albums_musics'))
+        .filter((link) => Number(link.id_album) === albumId)
+        .map((link) => String(link.id_music)),
+    )
+    return rows.filter((row) => ids.has(String(row.id_music)))
+  }
+
+  if (album !== null && name === 'files') {
+    const albumId = phpInteger(album)
+    const [albums, links, musics] = await Promise.all([
+      snapshot(c, lang, 'albums'),
+      snapshot(c, lang, 'albums_musics'),
+      snapshot(c, lang, 'musics'),
+    ])
+    const ids = new Set<string>()
+    const add = (value: unknown) => {
+      if (value !== null && value !== undefined) ids.add(String(value))
+    }
+    for (const row of albums) if (Number(row.id_album) === albumId) add(row.id_file_image)
+    const inAlbum = new Set(
+      links
+        .filter((link) => Number(link.id_album) === albumId)
+        .map((link) => String(link.id_music)),
+    )
+    for (const music of musics) {
+      if (!inAlbum.has(String(music.id_music))) continue
+      add(music.id_file_music)
+      add(music.id_file_instrumental_music)
+      add(music.id_file_image)
+    }
+    // As letras são o snapshot mais pesado: só entram quando o álbum tem músicas.
+    if (inAlbum.size > 0) {
+      for (const lyric of await snapshot(c, lang, 'lyrics')) {
+        if (inAlbum.has(String(lyric.id_music))) add(lyric.id_file_image)
+      }
+    }
+    return rows.filter((row) => ids.has(String(row.id_file)))
+  }
+
+  const slugs = url.searchParams.get('categories_slug')
+  if (slugs !== null && name === 'albums') {
+    const list = new Set(slugs.split(','))
+    const [categories, relations] = await Promise.all([
+      snapshot(c, lang, 'categories'),
+      snapshot(c, lang, 'categories_albums'),
+    ])
+    const wanted = new Set(
+      categories
+        .filter((category) => list.has(String(category.slug)))
+        .map((category) => String(category.id_category)),
+    )
+    const byAlbum = new Map<string, Row[]>()
+    for (const relation of byId(relations, 'id_category_album')) {
+      if (!wanted.has(String(relation.id_category))) continue
+      const key = String(relation.id_album)
+      byAlbum.set(key, [...(byAlbum.get(key) ?? []), relation])
+    }
+    const joined = rows.flatMap((row) =>
+      (byAlbum.get(String(row.id_album)) ?? []).map((relation) => ({
+        ...row,
+        subtitle: relation.name,
+        order: relation.order,
+      })),
+    )
+    const seen = new Set<string>()
+    return joined.filter((row) => {
+      const key = JSON.stringify(row)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }
+
+  return rows
+}
+
+/** Expansões `with_*` do Eloquent, montadas só para as linhas da página. */
+async function expandRelations(
+  c: Context<App>,
+  lang: string,
+  name: string,
+  rows: Row[],
+  url: URL,
+): Promise<Row[]> {
+  if (name === 'musics' && Number(url.searchParams.get('with_albums')) === 1) {
+    const owners = new Set(rows.map((row) => String(row.id_music)))
+    const [links, albums] = await Promise.all([
+      snapshot(c, lang, 'albums_musics'),
+      snapshot(c, lang, 'albums'),
+    ])
+    const albumById = new Map(albums.map((album) => [String(album.id_album), album]))
+    const byMusic = new Map<string, Row[]>()
+    for (const link of byId(links, 'id_album_music')) {
+      const key = String(link.id_music)
+      const album = albumById.get(String(link.id_album))
+      if (!owners.has(key) || !album) continue
+      byMusic.set(key, [
+        ...(byMusic.get(key) ?? []),
+        {
+          id_album: album.id_album,
+          name: album.name,
+          id_file_image: album.id_file_image,
+          color: album.color,
+          id_language: album.id_language,
+          created_at: album.created_at,
+          updated_at: album.updated_at,
+          pivot: { id_music: link.id_music, id_album: link.id_album, track: link.track },
+        },
+      ])
+    }
+    return rows.map((row) => ({ ...row, albums: byMusic.get(String(row.id_music)) ?? [] }))
+  }
+
+  if (name === 'albums' && Number(url.searchParams.get('with_categories')) === 1) {
+    const owners = new Set(rows.map((row) => String(row.id_album)))
+    const [relations, categories] = await Promise.all([
+      snapshot(c, lang, 'categories_albums'),
+      snapshot(c, lang, 'categories'),
+    ])
+    const categoryById = new Map(
+      categories.map((category) => [String(category.id_category), category]),
+    )
+    const byAlbum = new Map<string, Row[]>()
+    for (const relation of byId(relations, 'id_category_album')) {
+      const key = String(relation.id_album)
+      const category = categoryById.get(String(relation.id_category))
+      if (!owners.has(key) || !category) continue
+      byAlbum.set(key, [
+        ...(byAlbum.get(key) ?? []),
+        {
+          id_category: category.id_category,
+          name: category.name,
+          slug: category.slug,
+          order: category.order,
+          type: category.type,
+          id_language: category.id_language,
+          created_at: category.created_at,
+          updated_at: category.updated_at,
+          pivot: {
+            id_album: relation.id_album,
+            id_category: relation.id_category,
+            name: relation.name,
+            order: relation.order,
+          },
+        },
+      ])
+    }
+    return rows.map((row) => ({ ...row, categories: byAlbum.get(String(row.id_album)) ?? [] }))
+  }
+
+  return rows
+}
+
+rest.get('/health', async (c) => {
+  const [database, storage] = await Promise.allSettled([
+    c.env.DB.prepare('SELECT 1 AS ok').first(),
+    c.env.FILES.head('meta/params.json'),
+  ])
+  const databaseOk = database.status === 'fulfilled' && database.value !== null
+  const storageOk = storage.status === 'fulfilled' && storage.value !== null
+  const healthy = databaseOk && storageOk
+  return c.json(
     {
-      status: 'ok',
+      status: healthy ? 'ok' : 'error',
       timestamp: new Date().toISOString(),
       version: '1.0.0',
-      services: { storage: 'ok', cache: 'ok' },
+      services: {
+        database: databaseOk ? 'ok' : 'error',
+        storage: storageOk ? 'ok' : 'error',
+      },
     },
-    'no-store',
-  ),
-)
+    healthy ? 200 : 503,
+    { 'Cache-Control': 'no-store' },
+  )
+})
 
-rest.get('/version', (c) =>
-  json({
+rest.get('/version', async (c) => {
+  const object = await c.env.FILES.get('meta/params.json')
+  const params = object === null ? {} : await object.json<Record<string, unknown>>()
+  return json({
     api_version: '1.0.0',
     min_client_version: '1.0.0',
     runtime: 'Cloudflare Workers',
-    db_version: c.env.DB_VERSION,
-  }),
-)
+    db_version: params.db_version ?? null,
+  })
+})
 
 rest.get('/metadata', async (c) => {
   const data = await load<unknown>(c, 'metadata')
@@ -176,10 +645,44 @@ for (const path of ['/download', '/:lang/download']) {
   rest.get(path, async (c) => {
     const object = await c.env.FILES.get('meta/params.json')
     const params = object === null ? null : await object.json<Record<string, string>>()
-    const lang = c.req.param('lang')
-    const key = lang && LANGS.has(lang) ? `${lang}_download` : 'download'
-    const url = params?.[key] ?? params?.download
-    return url ? c.redirect(url, 302) : notFound(c)
+    const pathLang = c.req.param('lang')?.toLowerCase()
+    if (pathLang && !LANGS.has(pathLang)) return notFound(c)
+    const queryLang = c.req.query('lang')?.toLowerCase()
+    const lang = pathLang ?? (queryLang && LANGS.has(queryLang) ? queryLang : 'pt')
+    const download = params?.[`${lang}_download`] ?? params?.pt_download
+    if (!download) return notFound(c)
+
+    // Rota sem autenticação que grava no banco: um contador por dia limita os
+    // registros, e depois do teto a chamada não escreve mais nada. Sem a tabela
+    // do contador (migration ainda não aplicada) o registro simplesmente falha.
+    const forwarded = c.req.header('X-Forwarded-For') ?? null
+    const logDownload = async () => {
+      await c.env.DB.batch([
+        c.env.DB.prepare(
+          "INSERT INTO public_write_budget (day, name, used) VALUES (date('now'), 'download', 1) " +
+            'ON CONFLICT (day, name) DO UPDATE SET used = used + 1 WHERE used <= ?',
+        ).bind(DOWNLOAD_LOGS_PER_DAY),
+        c.env.DB.prepare(
+          'INSERT INTO download_logs ' +
+            '(version, ip, http_client_ip, http_x_forwarded_for, remote_addr, browser, id_language, created_at, updated_at) ' +
+            "SELECT ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now') " +
+            "WHERE (SELECT used FROM public_write_budget WHERE day = date('now') AND name = 'download') <= ?",
+        ).bind(
+          params?.[`${lang}_version`] ?? '',
+          c.req.header('CF-Connecting-IP') ?? forwarded?.split(',')[0]?.trim() ?? null,
+          c.req.header('Client-IP') ?? null,
+          forwarded,
+          c.req.header('Remote-Addr') ?? null,
+          c.req.header('User-Agent') ?? null,
+          lang,
+          DOWNLOAD_LOGS_PER_DAY,
+        ),
+      ])
+    }
+    c.executionCtx.waitUntil(
+      logDownload().catch((reason) => console.error('download_log_failed', reason)),
+    )
+    return c.redirect(download, 302)
   })
 }
 
@@ -193,9 +696,17 @@ rest.get('/:lang', (c) => {
 // Rota genérica: qualquer outra coleção conhecida do snapshot.
 rest.get('/:lang/:collection', async (c) => {
   const lang = c.req.param('lang') as string
-  const collection = COLLECTIONS[c.req.param('collection') as string]
-  if (!LANGS.has(lang) || collection === undefined) return notFound(c)
+  const name = c.req.param('collection') as string
+  const spec = COLLECTIONS[name]
+  if (!LANGS.has(lang) || spec === undefined) return notFound(c)
 
-  const rows = await load<Row[]>(c, `${lang}_${collection}`)
-  return rows === null ? notFound(c) : json(paginate(rows, new URL(c.req.url)))
+  const rows = await load<Row[]>(c, `${lang}_${name}`)
+  if (rows === null) return notFound(c)
+
+  const url = new URL(c.req.url)
+  const related = await relationalRows(c, lang, name, rows, url)
+  const filtered = filterRows(related, name, spec, url)
+  const page = paginate(sortRows(filtered, name, spec, url), url, pageSize(url))
+  page.data = await expandRelations(c, lang, name, page.data as Row[], url)
+  return json(page)
 })

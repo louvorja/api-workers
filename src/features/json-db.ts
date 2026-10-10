@@ -5,10 +5,10 @@ import type { App } from '../types.ts'
 
 /** Mesma restrição que o cliente aplica em Path.db — mantém a chave fora do path do bucket. */
 const KEY_RE = /^[a-zA-Z0-9_-]+$/
-// O banco é republicado em lotes diários e o violin-app já acrescenta a data
-// à URL. Um capítulo que acabou de ser aberto não precisa ser revalidado de
-// hora em hora: isso só gera 304s que continuam contando como invocações do
-// Worker. A data na URL mantém a atualização diária sem perder o cache.
+// O violin-app acrescenta a data à URL (e um carimbo único quando o operador
+// pede para atualizar), então um dia de cache não segura conteúdo velho: no dia
+// seguinte a URL é outra. Sem cache, cada abertura repetida vira uma requisição
+// na cota diária do plano gratuito — resposta 304 também conta.
 const JSON_CACHE = 'public, max-age=86400, stale-while-revalidate=604800'
 
 export const jsonDb = new Hono<App>()

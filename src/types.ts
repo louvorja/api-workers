@@ -4,9 +4,13 @@ import type { User } from './lib/auth/users.ts'
 export type Bindings = {
   FILES: R2Bucket
   DB: D1Database
-  DB_VERSION: string
-  LEGACY_API_URL: string
+  RATE_LIMIT_FILES: RateLimit
+  RATE_LIMIT_METADATA: RateLimit
+  RATE_LIMIT_GENERAL: RateLimit
   JWT_SECRET: string
+  GITHUB_TASK_TOKEN?: string
+  GITHUB_TASK_REF?: string
+  GITHUB_TASK_REPO?: string
   TELEGRAM_BOT_TOKEN?: string
   TELEGRAM_CHAT_ID?: string
 }

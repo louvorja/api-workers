@@ -1,15 +1,74 @@
-import { Hono } from 'hono'
-import { COMMON_HEADERS, notFound } from '../lib/http.ts'
-import { serveObject } from '../lib/r2.ts'
+import { type Context, Hono } from 'hono'
+import { COMMON_HEADERS } from '../lib/http.ts'
 import { openapi } from '../openapi.ts'
 import type { App } from '../types.ts'
 
 export const legacy = new Hono<App>()
 
-const passthrough: Array<[path: string, key: string]> = [
-  ['/version_log', 'meta/version_log.html'],
-  ['/onlinevideos', 'meta/onlinevideos.txt'],
-]
+const VERSION_RE = /^\d+\.\d+(?:\.\d+)*$/
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+}
+
+async function versionLog(c: Context<App>) {
+  const object = await c.env.FILES.get('meta/params.json')
+  const params = object === null ? {} : await object.json<Record<string, unknown>>()
+  const requestedLang = String(c.req.query('lang') ?? 'pt').toLowerCase()
+  const lang = requestedLang === 'es' ? 'es' : 'pt'
+  const requested = c.req.query('version') ?? c.req.query('versao')
+  const configured = params[`${lang}_version`]
+  const version = String(requested ?? configured ?? '')
+  const validVersion = VERSION_RE.test(version)
+  const softwareVersion = validVersion ? version.split('.').slice(0, 2).join('.') : ''
+
+  let body = `Não foi possivel encontrar informações sobre a versão ${version || 'informada'}!`
+  if (softwareVersion) {
+    try {
+      const response = await fetch(
+        `https://api.github.com/repos/louvorja/desktop/releases/tags/v${softwareVersion}`,
+        {
+          headers: {
+            Accept: 'application/vnd.github+json',
+            'User-Agent': 'louvorja-api-workers',
+            'X-GitHub-Api-Version': '2022-11-28',
+          },
+          signal: AbortSignal.timeout(5_000),
+        },
+      )
+      if (response.ok) {
+        const release = await response.json<{ body?: unknown }>()
+        if (typeof release.body === 'string') body = release.body
+      } else if (response.status !== 404) {
+        throw new Error(`GitHub respondeu ${response.status}`)
+      }
+    } catch (reason) {
+      console.error('version_log_fetch_failed', reason)
+      const fallback = await c.env.FILES.get('meta/version_log.html')
+      if (fallback !== null) {
+        const headers = new Headers(COMMON_HEADERS)
+        headers.set('Content-Type', 'text/html; charset=UTF-8')
+        headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600')
+        return new Response(c.req.method === 'HEAD' ? null : fallback.body, { headers })
+      }
+    }
+  }
+
+  const headers = new Headers(COMMON_HEADERS)
+  headers.set('Content-Type', 'text/html; charset=UTF-8')
+  headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600')
+  const notes = escapeHtml(body).replaceAll('\n', '<br>')
+  const html =
+    '<!doctype html><html><head><meta charset="utf-8">' +
+    '<style>body{padding:20px;font-family:Arial,sans-serif;color:#666}</style>' +
+    `</head><body><h1>${escapeHtml(version)}</h1>${notes}</body></html>`
+  return new Response(c.req.method === 'HEAD' ? null : html, { headers })
+}
 
 legacy.get('/openapi.json', () => {
   const headers = new Headers(COMMON_HEADERS)
@@ -36,27 +95,19 @@ legacy.get('/documentation', () => {
   )
 })
 
-for (const [path, key] of passthrough) {
-  legacy.on(['GET', 'HEAD'], path, async (c) => {
-    const res = await serveObject(
-      c.env.FILES,
-      key,
-      c.req.raw,
-      'public, max-age=3600, stale-while-revalidate=86400',
-    )
-    return res ?? notFound(c)
-  })
-}
+legacy.on(['GET', 'HEAD'], '/version_log', versionLog)
 
 /**
- * O handshake FTP saiu do ar: o desktop passou a baixar mídia por HTTPS em
- * /file (electron/main/download/index.js). O endpoint responde explicitamente
- * em vez de sumir, para que um cliente antigo receba um erro legível.
+ * O download por FTP foi descontinuado: a mídia sai por HTTPS em /file. O
+ * endpoint responde explicitamente em vez de sumir, para que um cliente antigo
+ * receba um erro legível.
  */
-legacy.get('/ftp', (c) => {
-  c.header('Cache-Control', 'no-store')
-  return c.json(
-    { error: 'FTP descontinuado', details: 'Baixe as mídias por HTTPS em /file/<caminho>' },
-    410,
-  )
-})
+for (const path of ['/ftp', '/:lang/ftp']) {
+  legacy.get(path, (c) => {
+    c.header('Cache-Control', 'no-store')
+    return c.json(
+      { error: 'FTP descontinuado', details: 'Baixe as mídias por HTTPS em /file/<caminho>' },
+      410,
+    )
+  })
+}

@@ -79,42 +79,74 @@ const restPaths = Object.fromEntries(
   ]),
 )
 
+const BEARER = [{ bearerAuth: [] }]
+const ADMIN_RESOURCE = {
+  name: 'resource',
+  in: 'path',
+  required: true,
+  schema: {
+    type: 'string',
+    enum: [
+      'users',
+      'categories',
+      'categories_albums',
+      'albums',
+      'musics',
+      'albums_musics',
+      'lyrics',
+    ],
+  },
+} as const
+
+const adminWriteResponses = {
+  200: { description: 'Operação concluída.' },
+  401: { description: 'Sessão ausente ou expirada.' },
+  403: { description: 'Usuário sem a permissão necessária.' },
+  404: NOT_FOUND,
+  422: { description: 'Falha de validação.' },
+}
+
 export const openapi = {
   openapi: '3.0.3',
   info: {
     title: 'LouvorJA API',
     version: '1.0.0',
     description: [
-      'Réplica de leitura de `api.louvorja.com.br`, rodando em Cloudflare Workers',
-      'com o acervo em R2.',
+      'Substituição da API PHP de `api.louvorja.com.br`, executada em Cloudflare',
+      'Workers, com o catálogo no D1 e os artefatos no R2.',
       '',
-      '**O que esta API é.** Uma camada de leitura, rápida e sem estado. Todo o',
-      'conteúdo é estático: JSONs do banco e mídia. Não há autenticação porque',
-      'não há nada para escrever.',
+      'As rotas públicas preservam o contrato dos apps. `/auth/*` e `/admin/*`',
+      'implementam o painel com JWT, validação, permissões e auditoria. `/tasks/*`',
+      'despacha jobs longos para GitHub Actions; a publicação gera os JSON e a',
+      'camada REST a partir do D1.',
       '',
-      '**O que ela não tem.** As rotas `/auth/*`, `/admin/*` e `/tasks/*` da API',
-      'original não existem aqui — elas dependem do banco relacional e continuam',
-      'no servidor de origem, que também é quem gera os JSONs servidos por',
-      '`/json_db` e `/db`.',
-      '',
-      '**Diferenças deliberadas em relação à origem:**',
+      '**Compatibilidade e correções deliberadas:**',
       '- O áudio é servido em Opus e as capas em JPEG; URLs `.mp3` e `.bmp`',
-      '  continuam resolvendo, por compatibilidade com clientes antigos.',
+      '  continuam resolvendo no HTTP.',
       '- Requisições `Range` devolvem `206` de verdade. A origem ignora o header',
       '  e manda o arquivo inteiro.',
       '- O `404` não expõe o caminho do arquivo no servidor, e `/{lang}/config`',
       '  não expõe o caminho do banco.',
       '- `Access-Control-Allow-Credentials` foi removido: junto de',
       '  `Allow-Origin: *` ele é rejeitado por qualquer navegador.',
-      '- `/ftp` responde `410`: o download por FTP foi substituído por HTTPS.',
+      '- O download por FTP foi descontinuado: `/ftp` responde `410` e a mídia',
+      '  sai por HTTPS em `/file`.',
     ].join('\n'),
   },
   servers: [{ url: 'https://api.louvorja.workers.dev', description: 'Produção' }],
+  components: {
+    securitySchemes: {
+      bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+    },
+  },
   tags: [
     { name: 'Banco estático', description: 'Export JSON consumido pelos apps.' },
     { name: 'Arquivos', description: 'Áudio, imagens e capas.' },
     { name: 'REST', description: 'Leitura paginada, no formato da API de origem.' },
     { name: 'Sistema', description: 'Metadados, versão e diagnóstico.' },
+    { name: 'Autenticação', description: 'Sessão JWT do painel.' },
+    { name: 'Admin', description: 'Catálogo e usuários no D1.' },
+    { name: 'Tarefas', description: 'Despacho de jobs operacionais.' },
   ],
   paths: {
     '/json_db/{key}': {
@@ -199,7 +231,8 @@ export const openapi = {
       get: {
         tags: ['Sistema'],
         summary: 'Parâmetros da aplicação',
-        description: 'JSON por padrão; `?type=env` devolve INI, como o instalador espera.',
+        description:
+          'JSON por padrão; `?type=env` devolve INI com CRLF. Não traz `conn_ftp`: o download por FTP foi descontinuado.',
         parameters: [
           {
             name: 'type',
@@ -249,9 +282,152 @@ export const openapi = {
     '/ftp': {
       get: {
         tags: ['Sistema'],
-        summary: 'Descontinuado',
-        description: 'Responde `410`. Baixe mídia por HTTPS em `/file/{path}`.',
+        summary: 'Download por FTP (descontinuado)',
+        description:
+          'A API não entrega mais credenciais de FTP. A resposta é sempre `410`, com a indicação de baixar a mídia por HTTPS em `/file/<caminho>`.',
         responses: { 410: { description: 'FTP descontinuado.' } },
+      },
+    },
+    '/auth/login': {
+      post: {
+        tags: ['Autenticação'],
+        summary: 'Entrar no painel',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['username', 'password'],
+                properties: { username: { type: 'string' }, password: { type: 'string' } },
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'JWT e usuário.' },
+          401: { description: 'Credenciais inválidas.' },
+          422: { description: 'Falha de validação.' },
+        },
+      },
+    },
+    '/auth/me': {
+      get: {
+        tags: ['Autenticação'],
+        summary: 'Usuário autenticado',
+        security: BEARER,
+        responses: { 200: { description: 'Usuário.' }, 401: { description: 'Sessão inválida.' } },
+      },
+    },
+    '/auth/refresh-token': {
+      post: {
+        tags: ['Autenticação'],
+        summary: 'Renovar JWT e bloquear o anterior',
+        security: BEARER,
+        responses: { 200: { description: 'Novo JWT.' }, 401: { description: 'Sessão inválida.' } },
+      },
+    },
+    '/auth/logout': {
+      post: {
+        tags: ['Autenticação'],
+        summary: 'Encerrar sessão',
+        security: BEARER,
+        responses: {
+          200: { description: 'Sessão bloqueada.' },
+          401: { description: 'Sessão inválida.' },
+        },
+      },
+    },
+    '/auth/change-password': {
+      post: {
+        tags: ['Autenticação'],
+        summary: 'Trocar senha',
+        security: BEARER,
+        responses: {
+          200: { description: 'Senha alterada.' },
+          400: { description: 'Senha atual incorreta.' },
+          422: { description: 'Falha de validação.' },
+        },
+      },
+    },
+    '/admin/{resource}': {
+      get: {
+        tags: ['Admin'],
+        summary: 'Listar recurso administrativo',
+        security: BEARER,
+        parameters: [ADMIN_RESOURCE, PAGE],
+        responses: adminWriteResponses,
+      },
+      post: {
+        tags: ['Admin'],
+        summary: 'Criar recurso administrativo',
+        security: BEARER,
+        parameters: [ADMIN_RESOURCE],
+        responses: adminWriteResponses,
+      },
+    },
+    '/admin/{resource}/{id}': {
+      get: {
+        tags: ['Admin'],
+        summary: 'Consultar recurso administrativo',
+        security: BEARER,
+        parameters: [ADMIN_RESOURCE, ID],
+        responses: adminWriteResponses,
+      },
+      put: {
+        tags: ['Admin'],
+        summary: 'Alterar recurso administrativo',
+        security: BEARER,
+        parameters: [ADMIN_RESOURCE, ID],
+        responses: adminWriteResponses,
+      },
+      delete: {
+        tags: ['Admin'],
+        summary: 'Excluir recurso administrativo',
+        security: BEARER,
+        parameters: [ADMIN_RESOURCE, ID],
+        responses: adminWriteResponses,
+      },
+    },
+    '/admin/files': {
+      get: {
+        tags: ['Admin'],
+        summary: 'Listar arquivos e vínculos',
+        security: BEARER,
+        parameters: [
+          PAGE,
+          { name: 'id_album', in: 'query', required: false, schema: { type: 'integer' } },
+        ],
+        responses: adminWriteResponses,
+      },
+    },
+    '/tasks': {
+      get: {
+        tags: ['Tarefas'],
+        summary: 'Listar tarefas disponíveis',
+        security: BEARER,
+        responses: {
+          200: { description: 'Nomes das tarefas.' },
+          401: { description: 'Sessão inválida.' },
+          403: { description: 'Somente administradores.' },
+        },
+      },
+    },
+    '/tasks/{task}': {
+      get: {
+        tags: ['Tarefas'],
+        summary: 'Agendar tarefa no GitHub Actions',
+        security: BEARER,
+        parameters: [{ name: 'task', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          202: { description: 'Workflow aceito.' },
+          401: { description: 'Sessão inválida.' },
+          403: { description: 'Somente administradores.' },
+          404: NOT_FOUND,
+          502: { description: 'GitHub recusou a solicitação.' },
+          503: { description: 'Dispatcher não configurado.' },
+          504: { description: 'Timeout no GitHub.' },
+        },
       },
     },
     '/{lang}/config': {

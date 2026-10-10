@@ -46,16 +46,35 @@
     }
   ],
 
+  // Mesmos tetos por minuto da API PHP. Os namespaces são independentes para
+  // arquivos, metadados e demais rotas.
+  "ratelimits": [
+    {
+      "name": "RATE_LIMIT_FILES",
+      "namespace_id": "910001",
+      "simple": { "limit": 10000, "period": 60 }
+    },
+    {
+      "name": "RATE_LIMIT_METADATA",
+      "namespace_id": "910002",
+      "simple": { "limit": 10000, "period": 60 }
+    },
+    {
+      "name": "RATE_LIMIT_GENERAL",
+      "namespace_id": "910003",
+      "simple": { "limit": 5000, "period": 60 }
+    }
+  ],
+
   // Declarar a lista impede o wrangler de injetar as chaves de ingestão do
   // .env como variáveis do Worker durante o dev. JWT_SECRET assina os tokens do
-  // painel; em dev ele vem de .dev.vars. TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID
-  // são opcionais (aviso de alteração no catálogo) e por isso ficam de fora.
+  // painel; em dev ele vem de .dev.vars. Os demais são opcionais e por isso
+  // ficam de fora: GITHUB_TASK_TOKEN (sem ele /tasks responde 503) e
+  // TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID (aviso de alteração no catálogo).
   "secrets": { "required": ["JWT_SECRET"] },
 
   "vars": {
-    // Espelha params.db_version da API legada. Entra no ETag/Cache-Control do
-    // /json_db para invalidar a borda quando o banco é regerado.
-    "DB_VERSION": "185",
-    "LEGACY_API_URL": "https://api.louvorja.com.br"
+    "GITHUB_TASK_REF": "main",
+    "GITHUB_TASK_REPO": "louvorja/api-workers"
   }
 }

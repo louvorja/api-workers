@@ -14,6 +14,9 @@ function toIni(params: Record<string, unknown>): string {
 }
 
 export const params = new Hono<App>()
+// É por aqui que o app descobre que há catálogo novo (`db_version`). Uma hora,
+// como o manifesto: é o atraso máximo para perceber uma publicação.
+const PARAMS_CACHE = 'public, max-age=3600, stale-while-revalidate=86400'
 
 params.on(['GET', 'HEAD'], '/params', async (c) => {
   const object = await c.env.FILES.get('meta/params.json')
@@ -21,7 +24,7 @@ params.on(['GET', 'HEAD'], '/params', async (c) => {
 
   const data = await object.json<Record<string, unknown>>()
   const headers = new Headers(COMMON_HEADERS)
-  headers.set('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400')
+  headers.set('Cache-Control', PARAMS_CACHE)
 
   if (c.req.query('type') === 'env') {
     headers.set('Content-Type', 'text/plain; charset=UTF-8')

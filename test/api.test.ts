@@ -65,6 +65,16 @@ describe('bundles', () => {
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toContain('application/zip')
   })
+
+  it('responde HEAD do bundle bíblico sem corpo e com cache longo', async () => {
+    const res = await call('/db/bible-bundle', { method: 'HEAD' })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('etag')).toMatch(/^".+"$/)
+    expect(res.headers.get('cache-control')).toBe(
+      'public, max-age=86400, stale-while-revalidate=604800',
+    )
+    expect((await res.arrayBuffer()).byteLength).toBe(0)
+  })
 })
 
 describe('file', () => {
@@ -133,6 +143,9 @@ describe('params', () => {
   it('devolve JSON por padrão', async () => {
     const res = await call('/params')
     expect(await res.json()).toEqual({ db_version: '185', help: 'x' })
+    expect(res.headers.get('cache-control')).toBe(
+      'public, max-age=3600, stale-while-revalidate=86400',
+    )
   })
 
   it('devolve INI com CRLF, como o parser Delphi espera', async () => {
@@ -248,5 +261,32 @@ describe('REST', () => {
   it('health não entra em cache', async () => {
     const res = await call('/health')
     expect(res.headers.get('cache-control')).toBe('no-store')
+  })
+
+  // Cada resposta sem cache é uma requisição a mais na cota diária do plano
+  // gratuito. Só o que depende de quem pede ou do instante fica sem cache.
+  it('deixa o catálogo em cache no cliente e na borda', async () => {
+    const cacheOf = async (path: string) => (await call(path)).headers.get('cache-control')
+    expect(await cacheOf('/json_db/config')).toBe(
+      'public, max-age=86400, stale-while-revalidate=604800',
+    )
+    expect(await cacheOf('/db/bible-bundle')).toBe(
+      'public, max-age=86400, stale-while-revalidate=604800',
+    )
+    expect(await cacheOf('/db/config')).toBe('public, max-age=3600, stale-while-revalidate=86400')
+    expect(await cacheOf('/pt/config')).toBe('public, max-age=3600, stale-while-revalidate=86400')
+    expect(await cacheOf('/onlinevideos')).toBe(
+      'public, max-age=3600, stale-while-revalidate=86400',
+    )
+    expect(await cacheOf('/params')).toBe('public, max-age=3600, stale-while-revalidate=86400')
+  })
+
+  it('avisa que o FTP foi descontinuado em vez de sumir com a rota', async () => {
+    for (const path of ['/ftp', '/pt/ftp']) {
+      const res = await call(path)
+      expect(res.status).toBe(410)
+      expect(res.headers.get('cache-control')).toBe('no-store')
+      expect(((await res.json()) as { error: string }).error).toBe('FTP descontinuado')
+    }
   })
 })

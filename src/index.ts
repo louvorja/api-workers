@@ -5,10 +5,13 @@ import { db } from './features/db.ts'
 import { files } from './features/files.ts'
 import { jsonDb } from './features/json-db.ts'
 import { legacy } from './features/legacy.ts'
+import { onlineVideos } from './features/online-videos.ts'
 import { params } from './features/params.ts'
 import { rest } from './features/rest.ts'
+import { tasks } from './features/tasks.ts'
 import { requireSecret } from './lib/auth/session.ts'
 import { COMMON_HEADERS, isPrivatePath, notFound, PRIVATE_HEADERS } from './lib/http.ts'
+import { applyRateLimit } from './lib/rate-limit.ts'
 import type { App } from './types.ts'
 
 const app = new Hono<App>()
@@ -19,9 +22,13 @@ app.use('*', async (c, next) => {
   for (const [k, v] of Object.entries(headers)) c.header(k, v)
 })
 
+app.use('*', applyRateLimit)
+
 app.options('*', (c) => c.body(null, 204))
 
-app.get('/', (c) => {
+app.get('/', async (c) => {
+  const object = await c.env.FILES.get('meta/params.json')
+  const current = object === null ? {} : await object.json<Record<string, unknown>>()
   c.header('Cache-Control', 'public, max-age=300')
   return c.json({
     name: 'api-louvorja',
@@ -39,7 +46,7 @@ app.get('/', (c) => {
       '/{lang}/{musics,albums,categories,hymnal,lyrics,files,languages}',
       '/openapi.json',
     ],
-    db_version: c.env.DB_VERSION,
+    db_version: current.db_version ?? null,
   })
 })
 
@@ -47,12 +54,16 @@ app.route('/', jsonDb)
 app.route('/', db)
 app.route('/', files)
 app.route('/', params)
+app.route('/', onlineVideos)
 app.route('/', legacy)
-// Antes do rest: /auth/me e /admin/musics casariam com /:lang/:collection.
+// Antes do rest: /auth/me, /admin/musics e /tasks/* casariam com /:lang/:collection.
 app.use('/auth/*', requireSecret)
 app.use('/admin/*', requireSecret)
+app.use('/tasks', requireSecret)
+app.use('/tasks/*', requireSecret)
 app.route('/', auth)
 app.route('/', admin)
+app.route('/', tasks)
 // Por último: a rota genérica /:lang/:collection casaria com /json_db, /db e
 // /file se viesse antes das rotas específicas.
 app.route('/', rest)

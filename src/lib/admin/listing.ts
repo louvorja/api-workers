@@ -255,7 +255,21 @@ export async function paginate(
       .bind(...where.params, ...paging)
   }
 
-  const [counted, list] = await db.batch<Record<string, unknown>>([count, data])
+  let counted: D1Result<Record<string, unknown>> | undefined
+  let list: D1Result<Record<string, unknown>> | undefined
+  try {
+    ;[counted, list] = await db.batch<Record<string, unknown>>([count, data])
+  } catch (error) {
+    // A carga inaugural acontece antes da migration de row_counts para não
+    // dobrar as escritas. Nesse intervalo, a publicação ainda precisa rodar.
+    if (!stored) throw error
+    const [fallbackCount, fallbackList] = await Promise.all([
+      db.prepare(`SELECT count(*) AS total FROM ${spec.from}`).all<Record<string, unknown>>(),
+      data.all<Record<string, unknown>>(),
+    ])
+    counted = fallbackCount
+    list = fallbackList
+  }
   let total = counted?.results[0]?.total
   if (total === undefined && stored) {
     // Tabela sem linha em row_counts (banco criado sem a migration): conta à moda antiga.

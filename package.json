@@ -1,7 +1,7 @@
 {
   "name": "api-louvorja",
   "version": "1.0.0",
-  "description": "API LouvorJA \u2014 substituta de api.louvorja.com.br em Cloudflare Workers",
+  "description": "API LouvorJA — substituta de api.louvorja.com.br em Cloudflare Workers",
   "private": true,
   "type": "module",
   "engines": {
@@ -27,24 +27,34 @@
     "d1:snapshot": "node --env-file=.env --experimental-strip-types scripts/pull-snapshot.ts",
     "d1:seed": "node --experimental-strip-types scripts/seed-d1.ts --snapshot=snapshot",
     "d1:user": "node --experimental-strip-types scripts/create-user.ts",
+    "cutover:check": "node --experimental-strip-types scripts/check-cutover.ts",
+    "test:cutover": "node --experimental-strip-types --test test/cutover.node.ts",
     "catalog:diff": "node --experimental-strip-types scripts/catalog-diff.ts",
-    "publish": "node --env-file=.env --experimental-strip-types scripts/publish.ts",
+    "publish": "node --env-file-if-exists=.env --experimental-strip-types scripts/publish.ts",
+    "publish:gate": "node --env-file-if-exists=.env --experimental-strip-types scripts/publish-gate.ts",
+    "test:bible-publication": "node --experimental-strip-types --test test/bible-publication.node.ts",
+    "files:reconcile": "node --env-file-if-exists=.env --experimental-strip-types scripts/reconcile-files.ts",
+    "test:files-reconcile": "node --experimental-strip-types --test test/reconcile-files.node.ts",
+    "online-videos:refresh": "node --env-file-if-exists=.env --experimental-strip-types scripts/refresh-online-videos.ts",
+    "test:online-videos-refresh": "node --experimental-strip-types --test test/refresh-online-videos.node.ts",
+    "slides:import": "node --env-file-if-exists=.env --experimental-strip-types scripts/import-slides.ts",
+    "test:slides-import": "node --experimental-strip-types --test test/import-slides.node.ts",
     "admin:dev": "npm --prefix admin run dev",
     "admin:build": "npm --prefix admin run build",
     "admin:deploy": "npm --prefix admin run build && wrangler deploy --config admin/wrangler.jsonc"
   },
   "dependencies": {
-    "hono": "^4.13.5"
+    "hono": "^4.13.13"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.12",
-    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/vitest-plugin": "^1.4.0",
     "@types/node": "^26.4.1",
     "aws4fetch": "^1.0.20",
     "bmp-js": "^0.1.0",
     "jpeg-js": "^0.4.4",
     "typescript": "^5.9.3",
     "vitest": "^4.1.4",
-    "wrangler": "^4.129.0"
+    "wrangler": "^4.149.0"
   }
 }
