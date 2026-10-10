@@ -1,219 +1,233 @@
-# LouvorJA API — Workers
+# LouvorJA API — Cloudflare Workers
 
-Réplica de leitura da [LouvorJA API](https://github.com/louvorja/api) em
-Cloudflare Workers, servindo o acervo a partir do R2. Cobre as rotas públicas
-usadas pelos apps; o CMS continua no repositório de origem.
+Substituição da API PHP do LouvorJA. O Worker mantém os contratos HTTP usados
+pelos apps, o painel administra o catálogo no D1 e o R2 guarda a mídia e os
+arquivos que os apps leem.
 
-## Documentação Interativa
+- API: `https://api.louvorja.workers.dev`
+- Swagger UI: `/documentation`
+- OpenAPI: `/openapi.json`
+- Painel: pasta [`admin/`](admin/), publicada como o Worker estático `adm`
+  (`https://adm.louvorja.workers.dev`).
 
-- **Swagger UI:** `/documentation`
-- **OpenAPI JSON:** `/openapi.json`
+Tudo roda no plano gratuito da Cloudflare. As decisões abaixo existem para
+caber nele; mude-as sabendo o que cada uma protege.
 
-## Base URL
+## Arquitetura
 
-```
-https://api.louvorja.workers.dev
-```
+| Parte | Responsabilidade |
+| --- | --- |
+| Worker + Hono | Rotas públicas, autenticação, CRUD administrativo e despacho de tarefas |
+| D1 | Fonte da verdade do catálogo, usuários e auditoria — usado só pelo painel |
+| R2 | Mídia, JSONs públicos, pacotes ZIP e parâmetros — o que os apps leem |
+| GitHub Actions | Jobs longos: publicação, reconciliação, YouTube e importação de slides |
 
-## Autenticação
+O caminho de um dado: o painel grava no D1; a publicação exporta o D1, gera os
+arquivos e os envia ao R2; os apps leem do R2 através do Worker.
 
-Nenhuma. Todo o conteúdo é público e somente leitura — não há nada para
-escrever. O header `Api-Token` é aceito e ignorado, por compatibilidade.
+### As rotas públicas não tocam o D1
 
----
+No plano gratuito o D1 para de responder quando a cota diária estoura (5
+milhões de linhas lidas, 100 mil escritas), e as rotas públicas não têm
+autenticação. Por isso:
 
-## Endpoints
+- leitura: toda rota pública responde a partir dos snapshots do R2, inclusive
+  os filtros relacionais (`id_album`, `categories_slug`, `with_albums`,
+  `with_categories`) e `/onlinevideos`;
+- escrita: a única exceção é o registro de `/download`, limitado a 500 por dia
+  por um contador (`public_write_budget`). Passado o teto, nada mais é gravado.
 
-### Documentação
+`test/legacy-routes.test.ts` falha se uma rota pública voltar a consultar o
+banco. `/health` faz um `SELECT 1`, que não lê linha nenhuma.
 
-| Método | Rota | Descrição |
-|--------|------|-----------|
-| GET | `/openapi.json` | Spec OpenAPI 3.0 (JSON) |
-| GET | `/documentation` | Swagger UI (HTML) |
+### Cache
 
-### Público (sem autenticação)
+Cada resposta sem cache é uma requisição a mais no teto diário de 100 mil do
+plano gratuito (resposta `304` também conta). O catálogo fica em cache no
+cliente e na borda:
 
-| Método | Rota | Descrição |
-|--------|------|-----------|
-| GET | `/metadata` | Metadados da Bíblia |
-| GET | `/player` | Página do player YouTube |
-| GET | `/download` | Redirect (302) p/ download do instalador desktop |
-| GET | `/version` | Versão da API |
-| GET | `/version_log` | Log de versões |
-| GET | `/health` | Health check |
-| GET | `/file/{path}` | Abrir arquivo estático |
-| GET | `/json_db` | Manifest dos bancos JSON exportados |
-| GET | `/json_db/{file}` | Download de arquivo JSON exportado |
-| GET | `/db/manifest` | Manifest com hash MD5 de cada tabela |
-| GET | `/db/bundle` | ZIP com as 18.060 tabelas |
-| GET | `/db/{table}` | Registros de uma tabela (`{ data, meta }`) |
-| GET | `/params` | Parâmetros do sistema (`?type=env` devolve INI) |
-| GET | `/onlinevideos` | Vídeos online (YouTube) |
-| GET | `/ftp` | Descontinuado — responde 410 |
+| Rotas | Cache |
+| --- | --- |
+| `/json_db/*`, `/db/bible-bundle` | um dia |
+| `/db/*`, `/{lang}/*`, `/params`, `/onlinevideos` | uma hora |
+| `/file/*` | um ano (nome estável) |
+| `/auth/*`, `/admin/*`, `/tasks/*`, `/health`, erros | sem cache |
 
-### Público por idioma (`/{lang}/...`)
+O app acrescenta a data à URL de `/json_db` e um carimbo único quando o
+operador pede para atualizar, então o cache não segura conteúdo velho além do
+dia.
 
-Idiomas disponíveis: `pt` e `es`.
+### Sem FTP e sem Bíblia no banco
 
-| Método | Rota | Descrição |
-|--------|------|-----------|
-| GET | `/{lang}` | Raiz do idioma |
-| GET | `/{lang}/languages` | Idiomas disponíveis |
-| GET | `/{lang}/config` | Configurações |
-| GET | `/{lang}/configs` | Configurações (alias) |
-| GET | `/{lang}/musics` | Listar músicas |
-| GET | `/{lang}/musics/{id}` | Buscar música por ID |
-| GET | `/{lang}/music/{id}` | Buscar música por ID (alias) |
-| GET | `/{lang}/categories` | Listar categorias |
-| GET | `/{lang}/categories/{id}/albums` | Álbuns de uma categoria |
-| GET | `/{lang}/categories/{id}/albums-with-musics` | Categoria com álbuns e músicas |
-| GET | `/{lang}/categories_albums` | Listar categorias-álbuns |
-| GET | `/{lang}/albums` | Listar álbuns |
-| GET | `/{lang}/albums/{id}` | Buscar álbum por ID |
-| GET | `/{lang}/album/{id}` | Buscar álbum por ID (alias) |
-| GET | `/{lang}/albums/category/{slug}` | Álbuns por slug de categoria |
-| GET | `/{lang}/albums_musics` | Listar associações álbum-música |
-| GET | `/{lang}/hymnal` | Listar hinário |
-| GET | `/{lang}/hymnal/{id}` | Buscar hino por ID |
-| GET | `/{lang}/lyrics` | Listar letras |
-| GET | `/{lang}/files` | Listar arquivos |
-| GET | `/{lang}/collections/online` | Coleção de conteúdo online |
-| GET | `/{lang}/download` | Redirect (302) por idioma |
+- O download por FTP foi descontinuado. Workers não recebe conexões FTP, e
+  manter um servidor à parte duplicaria o acervo. `/ftp` responde `410` com a
+  indicação de baixar por HTTPS em `/file`. O banco SQLite do programa Delphi
+  também não é gerado.
+- A Bíblia não é editada pelo painel: os 404 mil versículos ficam como estão no
+  R2 e a publicação não toca neles. `seed-d1.ts --bible` existe, mas carregá-los
+  ocuparia cerca de 11 dias da cota de escrita e não é parte do plano.
 
-### Fora de escopo
+## Contratos atendidos
 
-`/auth/*`, `/admin/*` e `/tasks/*` não existem aqui. Dependem do banco
-relacional e continuam em [louvorja/api](https://github.com/louvorja/api) —
-que é, inclusive, quem **gera** os JSONs servidos por `/json_db` e `/db`, via
-`/tasks/generate_static_jsons`.
+As rotas públicas incluem `/params`, `/onlinevideos`, `/file/*`, `/json_db/*`,
+`/db/*`, `/metadata`, `/download`, `/version`, `/version_log`, `/player` e as
+coleções sob `/{pt,es}/...`.
 
-## Parâmetros Comuns de Query
+O painel usa:
 
-| Parâmetro | Descrição |
-|-----------|-----------|
-| `page` | Paginação. Padrão: `1` |
-| `per_page` | Itens por página. Somente em `/db/{table}`. Padrão: `50` |
-| `type` | Somente em `/params`: `json` (padrão) ou `env` |
+- `/auth/login`, refresh, logout, usuário atual e troca de senha;
+- CRUD de usuários, categorias, vínculos, álbuns, músicas e letras em `/admin`;
+- consulta de arquivos em `/admin/files`;
+- `/tasks/*`, que agenda o workflow `maintenance.yml`.
 
----
+As listagens públicas preservam a paginação do Laravel e os filtros legados
+(`like:`, `orlike:`, `or:`, `sort_by`, `limit`, relações e idioma). As
+operações administrativas exigem JWT.
 
-## Diferenças em relação à origem
+## Publicação
 
-Nenhuma é acidental; todas estão descritas no `/openapi.json`.
+O D1 é a fonte da verdade. Uma publicação:
 
-| Diferença | Motivo |
-|-----------|--------|
-| Áudio em Opus, capas em JPEG | Bitrate escolhido pelo da fonte. URLs `.mp3` e `.bmp` continuam resolvendo, para clientes com cache antigo |
-| `Range` devolve `206` de verdade | A origem ignora o header e manda o arquivo inteiro |
-| `404` sem o caminho do arquivo | A origem expõe o caminho absoluto no servidor |
-| `/{lang}/config` sem `*_path_database` | A origem expõe o caminho do banco |
-| Sem `Access-Control-Allow-Credentials` | Junto de `Allow-Origin: *` é rejeitado por qualquer navegador |
-| `/player` valida o id do vídeo | A origem interpola o parâmetro cru dentro do atributo do `iframe` |
-| `/ftp` responde `410` | O desktop já baixa mídia por HTTPS |
+1. exporta o D1 para uma réplica SQL;
+2. gera os JSONs de `/json_db` e a camada REST e compara com o que está no R2;
+3. envia só o que mudou, refaz o ZIP e o manifesto;
+4. se o conteúdo mudou, sobe a versão em `meta/params.json` e, por último, no D1.
 
-Um player fazendo 8 buscas numa faixa transferia **16,8 MB em 1.752 ms** na
-origem, contra **0,4 MB em 316 ms** aqui.
-
-## Formato de Resposta
-
-**Sucesso:**
-```json
-{
-  "data": { ... }
-}
-```
-
-**Listagem paginada** (formato Laravel, 15 por página):
-```json
-{
-  "current_page": 1,
-  "data": [ ... ],
-  "last_page": 41,
-  "per_page": 15,
-  "total": 601,
-  "links": [ ... ]
-}
-```
-
-**Erro:**
-```json
-{
-  "error": "Arquivo não encontrado!"
-}
-```
-
-## Códigos de Status HTTP
-
-| Código | Descrição |
-|--------|-----------|
-| 200 | Sucesso |
-| 206 | Conteúdo parcial (resposta a `Range`) |
-| 302 | Redirect (`/download`) |
-| 304 | Não modificado |
-| 404 | Não encontrado |
-| 410 | Descontinuado (`/ftp`) |
-| 500 | Erro interno |
-
-## Stack
-
-- **Runtime:** Cloudflare Workers (`workerd`) — sem Node
-- **Framework:** Hono 4
-- **Armazenamento:** R2 (bucket `files`), sem banco de dados
-- **Cache:** Workers Caching, com fatiamento de `Range` na borda
-- **Testes:** Vitest sobre `@cloudflare/vitest-pool-workers`
-- **Lint/format:** Biome
-
-Bundle de ~87 KiB, startup de 8 ms.
-
-```
-src/
-  index.ts        wiring do Hono
-  features/       json-db, db, files, params, rest, legacy
-  lib/            http, r2, mime, paginate
-  openapi.ts      spec servida em /openapi.json
-scripts/          ingestão e manutenção do acervo (Node, local)
-```
-
-O bucket guarda mídia em `covers/`, `images/` e `musics/`; o export do banco em
-`json_db/`; o snapshot da camada REST em `rest/`; e `params`, `manifest` e
-`bundle.zip` em `meta/`.
-
-## Desenvolvimento Local
+Sem `--write` o script só mostra o que faria.
 
 ```bash
-# Instalar dependências
-npm install
-
-# Configurar credenciais do R2
-cp .env.example .env
-
-# Iniciar servidor de desenvolvimento
-npm run dev
-
-# Acessar Swagger UI
-# http://localhost:8787/documentation
+npx wrangler d1 export louvorja --remote --output=replica.sql
+npm run cutover:check -- --export=replica.sql
+npm run publish -- --export=replica.sql
+npm run publish -- --export=replica.sql --write
 ```
 
-| Comando | Descrição |
-|---------|-----------|
-| `npm run deploy` | Type-check e deploy |
-| `npm test` | Testes sobre o runtime real |
-| `npm run ingest` | Espelha o banco JSON para o R2 |
-| `npm run ingest:rest` | Snapshot da camada REST |
-| `npm run sync:media` | Baixa e transcodifica mídia faltante |
-| `npm run covers` | Converte capas `.bmp` para `.jpg` |
-| `npm run parity` | Compara resposta a resposta com a origem |
-| `npm run bench` | Mede latência e banda contra a origem |
+`publish` para antes de ler ou gravar o R2 quando a réplica não tem ao menos um
+administrador com senha no formato aceito.
 
-A ingestão é guiada por `/db/manifest` e se abastece do `/db/bundle`. Comparando
-o MD5 de cada tabela, uma reexecução regrava só o que mudou, em vez de fazer
-18.060 requisições à origem.
+`npm run catalog:diff` compara o que o banco gera com o que está publicado, byte
+a byte, e falha se sobrar diferença sem explicação.
 
-## Repositório
+## Administrador inicial e senhas do PHP
 
-- **GitHub:** https://github.com/louvorja/api-workers
-- **Issues:** https://github.com/louvorja/api-workers/issues
+Usuários e logs são dados operacionais do D1; o `d1:seed` carrega só o catálogo.
+A autenticação aceita `pbkdf2-sha256$100000`. Os hashes bcrypt do Laravel não são
+compatíveis nem convertidos: contas antigas precisam de senha nova.
+
+Antes da primeira publicação, crie um administrador. O SQL gerado deixa a senha
+como temporária e não deve ser versionado:
+
+```bash
+umask 077
+read -s LOUVORJA_USER_PASSWORD
+export LOUVORJA_USER_PASSWORD
+ADMIN_SQL="$(mktemp)"
+npm run --silent d1:user -- \
+  --name="Administrador" \
+  --username=admin-worker \
+  --email=admin-worker@example.com \
+  --admin > "$ADMIN_SQL"
+unset LOUVORJA_USER_PASSWORD
+npx wrangler d1 execute louvorja --remote --file="$ADMIN_SQL"
+rm -f "$ADMIN_SQL"
+```
+
+Depois, confirme o login e a troca obrigatória da senha temporária no painel.
+
+## Migrations
+
+As migrations de produção são aplicadas à mão, nunca pelo workflow:
+
+```bash
+npx wrangler d1 migrations apply louvorja --remote
+```
+
+`0002_row_counts.sql` cria gatilhos que somam uma escrita por linha inserida.
+Aplique-a só depois de terminar a carga inicial das letras.
+
+## Tarefas de manutenção
+
+| Comando | Função |
+| --- | --- |
+| `npm run cutover:check` | Exige um administrador com senha válida na réplica |
+| `npm run publish` | Gera e publica os snapshots |
+| `npm run publish:gate` | Diz se o painel alterou algo desde a última publicação |
+| `npm run catalog:diff` | Audita o que o banco gera contra o que está publicado |
+| `npm run files:reconcile` | Confere tamanho no R2 e duração com `ffprobe` |
+| `npm run online-videos:refresh` | Atualiza canais, playlists e vídeos do YouTube |
+| `npm run slides:import` | Importa `.slja/.lja` com áudio e imagens |
+
+O workflow `maintenance.yml` executa esses jobs fora do limite curto do Worker;
+as rotas `/tasks/*` só fazem um `workflow_dispatch` autenticado. O agendamento
+(de hora em hora) fica desligado até a variável `MAINTENANCE_SCHEDULE` do
+repositório valer `on` — ligue depois de conferir a primeira publicação manual.
+
+Exportar o banco não é de graça: cada export conta, na cota diária de leitura
+do D1, uma linha por linha exportada (medido: 62.829 linhas lidas para 62.829
+exportadas). Por isso a rotina de hora em hora começa por `publish:gate`, que
+compara o maior id da auditoria com a marca deixada pela última publicação e
+custa uma linha. Sem alteração do painel ela para ali; uma vez por dia roda
+inteira. Carga feita direto no banco não passa pela auditoria: depois dela,
+dispare a tarefa `publish` à mão.
+
+## Desenvolvimento
+
+Requisitos: Node 22, `zip`, `unzip` e `ffprobe` (pacote `ffmpeg`).
+
+```bash
+npm ci
+cp .env.example .env
+npm run dev          # API em http://localhost:8787
+npm run admin:dev    # painel, apontando para a API local
+npm run type-check
+npm test
+npm run lint
+```
+
+O runtime local usa D1 e R2 do Miniflare. Os testes `test/*.node.ts` exercitam
+os scripts de publicação e manutenção (`npm run test:<nome>`).
+
+## Configuração
+
+Bindings declarados em `wrangler.jsonc`:
+
+- `DB`: banco D1 `louvorja`;
+- `FILES`: bucket R2 `files`;
+- `RATE_LIMIT_FILES`, `RATE_LIMIT_METADATA` e `RATE_LIMIT_GENERAL`: limites por
+  minuto equivalentes aos três grupos da API PHP;
+- `JWT_SECRET` (obrigatório): assinatura das sessões do painel;
+- `GITHUB_TASK_TOKEN` (opcional): token restrito a Actions para `/tasks`. Sem
+  ele, `/tasks` responde `503` e o resto funciona.
+
+Os jobs usam `CLOUDFLARE_API_TOKEN`, credenciais S3 do R2 e, no job mensal,
+`YOUTUBE_API_KEY`. Segredos não entram em `wrangler.jsonc`, no R2 ou no Git.
+
+`PUBLIC_API_URL` é a origem gravada nas URLs dos snapshots e vale
+`https://api.louvorja.workers.dev`. O domínio `api.louvorja.com.br` pertence ao
+servidor antigo; só o use se ele passar a apontar para este Worker.
+
+## Segurança e compatibilidade HTTP
+
+- `/file/*` aceita somente `covers/`, `images/` e `musics/`, bloqueia subida de
+  diretório e responde `206` para `Range`.
+- Os nomes `.mp3` e `.bmp` continuam resolvendo para os objetos Opus/JPEG; o
+  `Content-Type` descreve os bytes reais.
+- Respostas privadas nunca vão para o cache, e um `404` público não fica preso
+  na borda.
+- Entradas de rede e arquivos importados são validados antes do uso.
+- Notas de versão vindas do GitHub são escapadas antes de entrar no HTML.
+
+## Colocar em produção
+
+1. termine a carga inicial e aplique as migrations;
+2. grave o segredo: `npx wrangler secret put JWT_SECRET`;
+3. crie o administrador e rode `cutover:check`;
+4. publique o Worker (`npm run deploy`) e o painel (`npm run admin:deploy`);
+5. confirme o login e a troca de senha no painel;
+6. rode a primeira publicação à mão (`workflow_dispatch`, tarefa `publish`) e
+   confira os apps;
+7. ligue o agendamento com a variável `MAINTENANCE_SCHEDULE=on`.
 
 ## Licença
 
-Este projeto está sob licença proprietária.
+Projeto proprietário.
