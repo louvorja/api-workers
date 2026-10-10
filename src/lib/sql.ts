@@ -38,10 +38,18 @@ export function foldSql(expr: string): string {
   return `lower(${sql})`
 }
 
+const FOLD_MAP = new Map(FOLD.flatMap(([chars, to]) => [...chars].map((ch) => [ch, to] as const)))
+const FOLD_RE = new RegExp(`[${[...FOLD_MAP.keys()].join('')}]`, 'g')
+const NON_ASCII = /[^\x00-\x7f]/
+
+/**
+ * Mesmo resultado de aplicar a tabela caractere a caractere, numa passada só.
+ * A API pública dobra dezenas de milhares de textos por requisição; percorrer
+ * cada um 37 vezes (uma por letra acentuada) estourava o tempo de CPU.
+ */
 export function foldText(text: string): string {
-  let out = text
-  for (const [chars, to] of FOLD) {
-    for (const ch of chars) out = out.replaceAll(ch, to)
-  }
-  return out.toLowerCase()
+  const plain = NON_ASCII.test(text)
+    ? text.replace(FOLD_RE, (ch) => FOLD_MAP.get(ch) as string)
+    : text
+  return plain.toLowerCase()
 }

@@ -29,7 +29,7 @@ async function load<T>(c: Context<App>, key: string): Promise<T | null> {
 
 type Row = Record<string, unknown>
 
-type Collection = {
+export type Collection = {
   fields: string[]
   text: Set<string>
 }
@@ -43,7 +43,7 @@ const collection = (fields: string[], text: string[]): Collection => ({
  * Campos aceitos por Data::data em cada controller PHP. A ordem também é a da
  * origem: ela importa quando um cliente combina filtros `or:` e filtros AND.
  */
-const COLLECTIONS: Record<string, Collection> = {
+export const COLLECTIONS: Record<string, Collection> = {
   languages: collection(['id_language', 'language'], ['id_language', 'language']),
   musics: collection(
     [
@@ -190,15 +190,12 @@ function filterOf(field: string, raw: string): Filter {
   return { field, like: false, or: false, value: raw }
 }
 
-function like(value: unknown, pattern: string): boolean {
-  if (value === null || value === undefined) return false
-  const input = [...foldText(String(value))]
-  const wildcard = [...foldText(pattern)]
+/** LIKE com `_`: programação dinâmica por caractere, sem regex nem backtracking. */
+function likeWithUnderscore(text: string, pattern: string): boolean {
+  const input = [...text]
   let previous = Array<boolean>(input.length + 1).fill(false)
   previous[0] = true
-
-  // LIKE sem regex evita backtracking caro em letras grandes e padrões hostis.
-  for (const token of wildcard) {
+  for (const token of pattern) {
     const current = Array<boolean>(input.length + 1).fill(false)
     if (token === '%') current[0] = previous[0] ?? false
     for (let i = 1; i <= input.length; i++) {
@@ -212,16 +209,58 @@ function like(value: unknown, pattern: string): boolean {
   return previous[input.length] ?? false
 }
 
-function equal(value: unknown, expected: unknown, text: boolean): boolean {
-  if (value === null || value === undefined) return false
-  const right = typeof expected === 'boolean' ? (expected ? 1 : 0) : expected
-  if (text || typeof value === 'string') return foldText(String(value)) === foldText(String(right))
+/**
+ * Compila um padrão LIKE num teste sobre o texto já dobrado.
+ *
+ * O padrão é preparado uma vez por requisição, não por linha. Sem `_` — o caso
+ * de toda busca do painel e dos apps — ele vira uma sequência de trechos
+ * procurados em ordem com `indexOf`, linear no tamanho do texto.
+ */
+export function likeMatcher(pattern: string): (folded: string) => boolean {
+  const folded = foldText(pattern)
+  if (folded.includes('_')) return (input) => likeWithUnderscore(input, folded)
 
-  const leftNumber = Number(value)
+  const segments = folded.split('%')
+  if (segments.length === 1) return (input) => input === folded
+
+  const first = segments[0] as string
+  const last = segments[segments.length - 1] as string
+  const middle = segments.slice(1, -1).filter((segment) => segment !== '')
+  return (input) => {
+    if (input.length < first.length + last.length || !input.startsWith(first)) return false
+    let position = first.length
+    for (const segment of middle) {
+      const found = input.indexOf(segment, position)
+      if (found === -1) return false
+      position = found + segment.length
+    }
+    return input.length - last.length >= position && input.endsWith(last)
+  }
+}
+
+type Test = (value: unknown) => boolean
+
+/** O lado fixo da comparação (o valor pedido) é dobrado e convertido uma vez só. */
+function testOf(filter: Filter, text: boolean): Test {
+  if (filter.like) {
+    const matches = likeMatcher(
+      String(typeof filter.value === 'boolean' ? Number(filter.value) : filter.value),
+    )
+    return (value) => value !== null && value !== undefined && matches(foldText(String(value)))
+  }
+
+  const right = typeof filter.value === 'boolean' ? (filter.value ? 1 : 0) : filter.value
+  const rightText = String(right)
+  const rightFolded = foldText(rightText)
   const rightNumber = Number(right)
-  return Number.isFinite(leftNumber) && Number.isFinite(rightNumber)
-    ? leftNumber === rightNumber
-    : String(value) === String(right)
+  return (value) => {
+    if (value === null || value === undefined) return false
+    if (text || typeof value === 'string') return foldText(String(value)) === rightFolded
+    const leftNumber = Number(value)
+    return Number.isFinite(leftNumber) && Number.isFinite(rightNumber)
+      ? leftNumber === rightNumber
+      : String(value) === rightText
+  }
 }
 
 function fieldValue(row: Row, collectionName: string, field: string, url: URL): unknown {
@@ -230,10 +269,12 @@ function fieldValue(row: Row, collectionName: string, field: string, url: URL): 
   return row[field]
 }
 
-function filterRows(rows: Row[], name: string, spec: Collection, url: URL): Row[] {
+export function filterRows(rows: Row[], name: string, spec: Collection, url: URL): Row[] {
   const filters = spec.fields.flatMap((field) => {
     const raw = url.searchParams.get(field)
-    return raw === null ? [] : [filterOf(field, raw)]
+    if (raw === null) return []
+    const filter = filterOf(field, raw)
+    return [{ field, or: filter.or, test: testOf(filter, spec.text.has(field)) }]
   })
   if (filters.length === 0) return rows
 
@@ -242,13 +283,9 @@ function filterRows(rows: Row[], name: string, spec: Collection, url: URL): Row[
     let anyGroup = false
     let group: boolean | undefined
     for (const filter of filters) {
-      const value = fieldValue(row, name, filter.field, url)
-      const matches = filter.like
-        ? like(
-            value,
-            String(typeof filter.value === 'boolean' ? Number(filter.value) : filter.value),
-          )
-        : equal(value, filter.value, spec.text.has(filter.field))
+      // Num grupo que já falhou, os ANDs seguintes não mudam nada.
+      if (group === false && !filter.or) continue
+      const matches = filter.test(fieldValue(row, name, filter.field, url))
       if (group === undefined) group = matches
       else if (filter.or) {
         anyGroup ||= group
@@ -259,38 +296,53 @@ function filterRows(rows: Row[], name: string, spec: Collection, url: URL): Row[
   })
 }
 
-function compare(a: unknown, b: unknown, text: boolean): number {
-  if (a === b) return 0
-  if (a === null || a === undefined) return -1
-  if (b === null || b === undefined) return 1
-  if (!text && typeof a === 'number' && typeof b === 'number') return a - b
-  const left = foldText(String(a))
-  const right = foldText(String(b))
-  return left < right ? -1 : left > right ? 1 : 0
+/** Valor de ordenação de uma linha; o texto dobrado é calculado no máximo uma vez. */
+type SortKey = { raw: unknown; folded?: string }
+
+function compareKeys(a: SortKey, b: SortKey, text: boolean): number {
+  if (a.raw === b.raw) return 0
+  if (a.raw === null || a.raw === undefined) return -1
+  if (b.raw === null || b.raw === undefined) return 1
+  if (!text && typeof a.raw === 'number' && typeof b.raw === 'number') return a.raw - b.raw
+  a.folded ??= foldText(String(a.raw))
+  b.folded ??= foldText(String(b.raw))
+  return a.folded < b.folded ? -1 : a.folded > b.folded ? 1 : 0
 }
 
-function sortRows(rows: Row[], name: string, spec: Collection, url: URL): Row[] {
-  const available = new Set(rows.flatMap((row) => Object.keys(row)))
-  if (name === 'files') available.add('host')
-  const sorts = (url.searchParams.get('sort_by') ?? '').split(',').flatMap((item) => {
+export function sortRows(rows: Row[], name: string, spec: Collection, url: URL): Row[] {
+  const requested = (url.searchParams.get('sort_by') ?? '').split(',').flatMap((item) => {
     const [field, direction = 'asc'] = item.split('.')
-    return field && available.has(field)
-      ? [{ field, desc: direction.toLowerCase() === 'desc', text: spec.text.has(field) }]
-      : []
+    return field ? [{ field, desc: direction.toLowerCase() === 'desc' }] : []
   })
+  if (requested.length === 0) return rows
+
+  // Vale ordenar por qualquer campo que exista em alguma linha.
+  const sorts = requested
+    .filter(
+      ({ field }) =>
+        (name === 'files' && field === 'host') || rows.some((row) => Object.hasOwn(row, field)),
+    )
+    .map((sort) => ({ ...sort, text: spec.text.has(sort.field) }))
   if (sorts.length === 0) return rows
 
-  return [...rows].sort((left, right) => {
-    for (const sort of sorts) {
-      const result = compare(
-        fieldValue(left, name, sort.field, url),
-        fieldValue(right, name, sort.field, url),
+  // O comparador roda perto de um milhão de vezes na coleção de letras: cada
+  // linha guarda as chaves prontas em vez de dobrar o texto a cada comparação.
+  const keyed = rows.map((row) => ({
+    row,
+    keys: sorts.map((sort): SortKey => ({ raw: fieldValue(row, name, sort.field, url) })),
+  }))
+  keyed.sort((left, right) => {
+    for (const [index, sort] of sorts.entries()) {
+      const result = compareKeys(
+        left.keys[index] as SortKey,
+        right.keys[index] as SortKey,
         sort.text,
       )
       if (result !== 0) return sort.desc ? -result : result
     }
     return 0
   })
+  return keyed.map((entry) => entry.row)
 }
 
 function pageSize(url: URL): number {
