@@ -68,6 +68,16 @@ describe('bundles', () => {
 })
 
 describe('file', () => {
+  it('serve nome com reticências, mas não deixa subir de diretório', async () => {
+    await env.FILES.put('musics/pt/A/Mundo...Paz.opus', new Uint8Array(7))
+    const res = await call(`/file/musics/pt/A/${encodeURIComponent('Mundo...Paz.opus')}`)
+    expect(res.status).toBe(200)
+    expect((await res.arrayBuffer()).byteLength).toBe(7)
+
+    expect((await call('/file/musics/pt/A/%2E%2E/B.opus')).status).toBe(404)
+    expect((await call('/file/musics/%2E%2E/%2E%2E/json_db/config.json')).status).toBe(404)
+  })
+
   it('resolve .bmp para a capa .jpg convertida', async () => {
     const res = await call('/file/covers/1992.bmp')
     expect(res.status).toBe(200)

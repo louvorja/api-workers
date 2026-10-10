@@ -47,7 +47,10 @@ files.on(['GET', 'HEAD'], '/file/*', async (c) => {
     return notFound(c)
   }
 
-  if (path === '' || path.includes('..') || path.startsWith('/')) return notFound(c)
+  // Só o segmento ".." sobe de diretório. Barrar a sequência em qualquer lugar
+  // derrubava faixas com reticências no nome ("Pode Cair o Mundo...Estou em Paz").
+  if (path === '' || path.startsWith('/')) return notFound(c)
+  if (path.split('/').some((segment) => segment === '..')) return notFound(c)
   if (!MEDIA_PREFIXES.some((prefix) => path.startsWith(prefix))) return notFound(c)
 
   for (const key of candidates(path)) {
