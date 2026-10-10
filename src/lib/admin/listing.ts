@@ -3,13 +3,31 @@ import { foldSql, foldText, toIso } from '../sql.ts'
 /**
  * Coluna de uma listagem, na ordem do `select` do controller de origem. `key` é
  * o nome que sai no JSON e o que o cliente usa para filtrar e ordenar; `expr`,
- * a expressão SQL por trás dele.
+ * a expressão SQL por trás dele. `joined` marca a coluna que vem de uma das
+ * junções de `decor`.
  */
-export type Column = { key: string; expr: string; text?: boolean; filter?: boolean }
+export type Column = {
+  key: string
+  expr: string
+  text?: boolean
+  filter?: boolean
+  joined?: boolean
+}
 
+/**
+ * `from` é a tabela principal mais as junções que mudam quais linhas existem.
+ * `decor` são as junções que só acrescentam colunas (LEFT JOIN por chave única):
+ * não mudam a contagem, então ficam fora dela — e, quando nem filtro nem
+ * ordenação dependem delas, só são feitas nas linhas da página.
+ */
 export type ListSpec = {
   columns: Column[]
   from: string
+  decor?: string
+  /** Nome da tabela principal; habilita paginar antes de juntar. */
+  table?: string
+  /** A tabela tem o total mantido em `row_counts` (ver migrations). */
+  counted?: boolean
   /** Desempate estável da ordenação — o MySQL devolvia na ordem da chave. */
   tiebreak: string
   distinct?: boolean
@@ -42,14 +60,20 @@ function explode(text: string): { like: boolean; or: boolean; value: unknown } {
  * AND/OR de cada elo vem do prefixo do valor. A precedência resultante é a do
  * SQL — reproduzir a corrente elo a elo é o que mantém o mesmo resultado.
  */
-function buildWhere(spec: ListSpec, query: URLSearchParams, pre: Where[]): Where {
+function buildWhere(
+  spec: ListSpec,
+  query: URLSearchParams,
+  pre: Where[],
+): Where & { joined: boolean } {
   const chain: ChainedWhere[] = pre.map((w) => ({ ...w, bool: 'AND' }))
+  let joined = false
 
   for (const column of spec.columns) {
     if (column.filter === false) continue
     const raw = query.get(column.key)
     if (raw === null) continue
 
+    joined ||= column.joined === true
     const { like, or, value } = explode(raw)
     chain.push(
       like
@@ -62,24 +86,37 @@ function buildWhere(spec: ListSpec, query: URLSearchParams, pre: Where[]): Where
     )
   }
 
-  if (chain.length === 0) return { sql: '', params: [] }
+  if (chain.length === 0) return { sql: '', params: [], joined }
   return {
     sql: `WHERE ${chain.map((w, i) => (i === 0 ? w.sql : `${w.bool} ${w.sql}`)).join(' ')}`,
     params: chain.flatMap((w) => w.params),
+    joined,
   }
 }
 
-function buildOrder(spec: ListSpec, query: URLSearchParams): string {
+function buildOrder(spec: ListSpec, query: URLSearchParams): { sql: string; joined: boolean } {
   const parts: string[] = []
+  let joined = false
   for (const item of (query.get('sort_by') ?? '').split(',')) {
     const [name, direction] = item.split('.')
     const column = spec.columns.find((c) => c.key === name)
     if (!column) continue
+    joined ||= column.joined === true
     const expr = column.text ? foldSql(column.expr) : column.expr
     parts.push(`${expr} ${direction === 'desc' ? 'DESC' : 'ASC'}`)
   }
   parts.push(spec.tiebreak)
-  return `ORDER BY ${parts.join(', ')}`
+  return { sql: `ORDER BY ${parts.join(', ')}`, joined }
+}
+
+/**
+ * `only=a,b` devolve só essas colunas. Não existe na origem: é o que o painel
+ * manda ao montar uma caixa de seleção, que só precisa do id e do nome.
+ */
+function selectedColumns(spec: ListSpec, query: URLSearchParams): Column[] {
+  const only = new Set((query.get('only') ?? '').split(','))
+  const picked = spec.columns.filter((column) => only.has(column.key))
+  return picked.length > 0 ? picked : spec.columns
 }
 
 /**
@@ -161,7 +198,13 @@ export function presentRow(row: Record<string, unknown>): Record<string, unknown
   return row
 }
 
-/** Porte de Data::data: filtra, ordena e pagina uma listagem. */
+/**
+ * Porte de Data::data: filtra, ordena e pagina uma listagem.
+ *
+ * O resultado é o da consulta direta da origem; o que muda é quanto do banco é
+ * percorrido para chegar nele. No D1 cada linha lida conta na cota diária, e a
+ * consulta ingênua lia a tabela inteira duas vezes por tela.
+ */
 export async function paginate(
   db: D1Database,
   spec: ListSpec,
@@ -170,22 +213,57 @@ export async function paginate(
   present: (row: Record<string, unknown>) => Record<string, unknown> = presentRow,
 ): Promise<Paginated> {
   const query = url.searchParams
+  const columns = selectedColumns(spec, query)
   const where = buildWhere(spec, query, pre)
+  const order = buildOrder(spec, query)
   const perPage = perPageOf(query)
   const page = pageOf(query)
-  const select = spec.columns.map((c) => `${c.expr} AS "${c.key}"`).join(', ')
+  const select = columns.map((c) => `${c.expr} AS "${c.key}"`).join(', ')
+  const distinct = spec.distinct ? 'DISTINCT ' : ''
+  const full = spec.decor ? `${spec.from} ${spec.decor}` : spec.from
+  const paging = [perPage, (page - 1) * perPage]
 
-  const [count, list] = await db.batch<Record<string, unknown>>([
-    db.prepare(`SELECT count(*) AS total FROM ${spec.from} ${where.sql}`).bind(...where.params),
-    db
+  // Sem filtro nenhum, o total da tabela já está guardado.
+  const stored = spec.counted && spec.table === spec.from && where.sql === '' && !spec.distinct
+  const count = stored
+    ? db.prepare('SELECT total FROM row_counts WHERE name = ?').bind(spec.table)
+    : db
+        .prepare(`SELECT count(*) AS total FROM ${where.joined ? full : spec.from} ${where.sql}`)
+        .bind(...where.params)
+
+  const usesDecor = where.joined || order.joined
+  let data: D1PreparedStatement
+  if (!usesDecor && !columns.some((c) => c.joined)) {
+    data = db
       .prepare(
-        `SELECT ${spec.distinct ? 'DISTINCT ' : ''}${select} FROM ${spec.from} ${where.sql} ` +
-          `${buildOrder(spec, query)} LIMIT ? OFFSET ?`,
+        `SELECT ${distinct}${select} FROM ${spec.from} ${where.sql} ${order.sql} LIMIT ? OFFSET ?`,
       )
-      .bind(...where.params, perPage, (page - 1) * perPage),
-  ])
+      .bind(...where.params, ...paging)
+  } else if (!usesDecor && spec.table && !spec.distinct) {
+    // Escolhe as linhas da página na tabela principal e só então junta o resto.
+    data = db
+      .prepare(
+        `SELECT ${select} FROM (SELECT ${spec.table}.* FROM ${spec.from} ${where.sql} ` +
+          `${order.sql} LIMIT ? OFFSET ?) AS ${spec.table} ${spec.decor ?? ''} ${order.sql}`,
+      )
+      .bind(...where.params, ...paging)
+  } else {
+    data = db
+      .prepare(
+        `SELECT ${distinct}${select} FROM ${full} ${where.sql} ${order.sql} LIMIT ? OFFSET ?`,
+      )
+      .bind(...where.params, ...paging)
+  }
 
-  const total = Number(count?.results[0]?.total ?? 0)
+  const [counted, list] = await db.batch<Record<string, unknown>>([count, data])
+  let total = counted?.results[0]?.total
+  if (total === undefined && stored) {
+    // Tabela sem linha em row_counts (banco criado sem a migration): conta à moda antiga.
+    total = (
+      await db.prepare(`SELECT count(*) AS total FROM ${spec.from}`).first<{ total: number }>()
+    )?.total
+  }
+
   const rows = (list?.results ?? []).map(present)
-  return envelope(rows, total, perPage, page, `${url.origin}${url.pathname}`)
+  return envelope(rows, Number(total ?? 0), perPage, page, `${url.origin}${url.pathname}`)
 }

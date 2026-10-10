@@ -56,12 +56,16 @@ const MAX_STATEMENT_BYTES = 80_000
 const MAX_ROWS_PER_FILE = 10_000
 // Folga sobre as 100 mil escritas diárias do plano gratuito.
 const DAILY_WRITES = 80_000
-/** Índices por tabela: cada um conta como mais uma linha escrita por linha inserida. */
-const INDEXES: Record<string, number> = {
-  files: 2,
+/**
+ * Escritas a mais por linha inserida: uma por índice e, nas tabelas com total
+ * em `row_counts`, uma do gatilho que o mantém.
+ */
+const EXTRA_WRITES: Record<string, number> = {
+  files: 3,
   categories: 1,
-  lyrics: 1,
-  albums_musics: 2,
+  musics: 1,
+  lyrics: 2,
+  albums_musics: 3,
   categories_albums: 2,
   bible_version: 1,
   bible_book: 1,
@@ -105,7 +109,7 @@ function emit(table: string, columns: string[], rows: Row[]) {
     const suffix = parts > 1 ? `_${String(part + 1).padStart(2, '0')}` : ''
     const name = `${prefix}_${table}${suffix}.sql`
     writeFileSync(join(OUT, name), `${statementsFor(table, columns, slice).join('\n')}\n`)
-    written.push({ name, writes: slice.length * (1 + (INDEXES[table] ?? 0)) })
+    written.push({ name, writes: slice.length * (1 + (EXTRA_WRITES[table] ?? 0)) })
   }
   totalRows += rows.length
   console.log(`  ${prefix}_${table}: ${rows.length} linhas em ${parts} arquivo(s)`)

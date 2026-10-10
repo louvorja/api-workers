@@ -262,7 +262,12 @@ export default {
       this.loading = true;
       Api.get(
         this.options_url ?? "",
-        Object.assign(this.options_params ?? {}, { limit: -1 }),
+        // `only` pede só o código e o rótulo: sem ele a API devolve o registro
+        // inteiro de cada opção, com os arquivos, só para montar a lista.
+        Object.assign(this.options_params ?? {}, {
+          limit: -1,
+          only: `${this.options_key},${this.options_label}`,
+        }),
         function (resp, data) {
           self.loading = false;
           self.error_field = data.error ?? "";

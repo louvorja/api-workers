@@ -373,6 +373,80 @@ describe('listagem', () => {
   })
 })
 
+describe('custo de leitura', () => {
+  const stored = async (name: string) =>
+    (await env.DB.prepare('SELECT total FROM row_counts WHERE name = ?').bind(name).first<Json>())
+      ?.total
+  const real = async (table: string) =>
+    (await env.DB.prepare(`SELECT count(*) AS n FROM ${table}`).first<Json>())?.n
+
+  it('o total guardado acompanha inclusões e exclusões, até em cascata', async () => {
+    for (const table of ['musics', 'lyrics', 'files', 'albums_musics']) {
+      expect(await stored(table)).toBe(await real(table))
+    }
+
+    const criada = (await (
+      await call('/admin/musics', {
+        method: 'POST',
+        token: admin,
+        json: { name: 'Temporária', id_language: 'pt' },
+      })
+    ).json()) as Json
+    const id = criada.data.id_music
+    await call('/admin/lyrics', {
+      method: 'POST',
+      token: admin,
+      json: {
+        id_music: id,
+        lyric: 'x',
+        time: '00:00:01',
+        instrumental_time: '00:00:00',
+        show_slide: 1,
+        order: 1,
+        id_language: 'pt',
+      },
+    })
+    expect(await stored('musics')).toBe(await real('musics'))
+    expect(await stored('lyrics')).toBe(await real('lyrics'))
+
+    const lista = (await (await call('/admin/lyrics?limit=1', { token: admin })).json()) as Json
+    expect(lista.total).toBe(await real('lyrics'))
+
+    // Excluir a música apaga as letras dela por tabela; o gatilho conta cada uma.
+    await call(`/admin/musics/${id}`, { method: 'DELETE', token: admin })
+    expect(await stored('musics')).toBe(await real('musics'))
+    expect(await stored('lyrics')).toBe(await real('lyrics'))
+  })
+
+  it('com filtro o total é contado de verdade', async () => {
+    const body = (await (await call('/admin/lyrics?id_music=1', { token: admin })).json()) as Json
+    expect(body.total).toBe(2)
+  })
+
+  it('a caixa de seleção do painel pede só o código e o nome', async () => {
+    const body = (await (
+      await call('/admin/musics?sort_by=name&limit=-1&only=id_music,name', { token: admin })
+    ).json()) as Json
+    expect(body.total).toBe(await real('musics'))
+    expect(Object.keys(body.data[0])).toEqual(['id_music', 'name'])
+
+    // Coluna desconhecida em `only` não derruba nem esvazia a resposta.
+    const tudo = (await (await call('/admin/musics?only=nada', { token: admin })).json()) as Json
+    expect(Object.keys(tudo.data[0])).toContain('url_music')
+  })
+
+  it('juntar depois de paginar devolve as mesmas linhas, na mesma ordem', async () => {
+    const pagina = (await (
+      await call('/admin/lyrics?limit=2&page=2&sort_by=id_lyric.desc', { token: admin })
+    ).json()) as Json
+    const todas = (await (
+      await call('/admin/lyrics?limit=-1&sort_by=id_lyric.desc', { token: admin })
+    ).json()) as Json
+    expect(pagina.data).toEqual(todas.data.slice(2, 4))
+    expect(pagina.data[0].music).toBeTypeOf('string')
+  })
+})
+
 describe('registro único', () => {
   it('música traz as letras, e o slide sem imagem herda a da música', async () => {
     const { data } = (await (await call('/admin/musics/1', { token: admin })).json()) as Json

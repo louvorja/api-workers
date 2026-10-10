@@ -37,18 +37,19 @@ export const MUSIC_FILES =
 
 export const musicFileColumns = (base: string): Column[] => [
   { key: 'id_file_image', expr: 'musics.id_file_image' },
-  { key: 'url_image', expr: fileUrl(base, 'files_image'), text: true },
-  { key: 'image_version', expr: 'files_image.version' },
+  { key: 'url_image', expr: fileUrl(base, 'files_image'), text: true, joined: true },
+  { key: 'image_version', expr: 'files_image.version', joined: true },
   { key: 'id_file_music', expr: 'musics.id_file_music' },
-  { key: 'url_music', expr: fileUrl(base, 'files_music'), text: true },
-  { key: 'music_version', expr: 'files_music.version' },
+  { key: 'url_music', expr: fileUrl(base, 'files_music'), text: true, joined: true },
+  { key: 'music_version', expr: 'files_music.version', joined: true },
   { key: 'id_file_instrumental_music', expr: 'musics.id_file_instrumental_music' },
   {
     key: 'url_instrumental_music',
     expr: fileUrl(base, 'files_instrumental_music'),
     text: true,
+    joined: true,
   },
-  { key: 'instrumental_music_version', expr: 'files_instrumental_music.version' },
+  { key: 'instrumental_music_version', expr: 'files_instrumental_music.version', joined: true },
 ]
 
 const selectOf = (columns: Column[]) => columns.map((c) => `${c.expr} AS "${c.key}"`).join(', ')
@@ -134,17 +135,18 @@ const categoriesAlbums: Resource = {
       columns: [
         { key: 'id_category_album', expr: 'categories_albums.id_category_album' },
         { key: 'id_category', expr: 'categories_albums.id_category' },
-        { key: 'category_name', expr: 'categories.name', text: true },
+        { key: 'category_name', expr: 'categories.name', text: true, joined: true },
         { key: 'id_album', expr: 'categories_albums.id_album' },
-        { key: 'album_name', expr: 'albums.name', text: true },
+        { key: 'album_name', expr: 'albums.name', text: true, joined: true },
         { key: 'name', expr: 'categories_albums.name', text: true },
         { key: 'order', expr: 'categories_albums."order"' },
         { key: 'id_language', expr: 'categories_albums.id_language', text: true },
       ],
-      from:
-        'categories_albums ' +
+      from: 'categories_albums',
+      decor:
         'LEFT JOIN categories ON categories_albums.id_category = categories.id_category ' +
         'LEFT JOIN albums ON categories_albums.id_album = albums.id_album',
+      table: 'categories_albums',
       tiebreak: 'categories_albums.id_category_album ASC',
     },
     pre: languageFilter('categories_albums.id_language', query),
@@ -186,7 +188,7 @@ const albums: Resource = {
   list: (base, query) => {
     const slugs = query.get('categories_slug')
     const pre = languageFilter('albums.id_language', query)
-    let from = 'albums LEFT JOIN files ON albums.id_file_image = files.id_file'
+    let from = 'albums'
     if (slugs !== null) {
       const list = slugs.split(',')
       from +=
@@ -200,8 +202,8 @@ const albums: Resource = {
           { key: 'id_album', expr: 'albums.id_album' },
           { key: 'name', expr: 'albums.name', text: true },
           { key: 'id_file_image', expr: 'albums.id_file_image' },
-          { key: 'url_image', expr: fileUrl(base, 'files'), text: true },
-          { key: 'image_version', expr: 'files.version' },
+          { key: 'url_image', expr: fileUrl(base, 'files'), text: true, joined: true },
+          { key: 'image_version', expr: 'files.version', joined: true },
           { key: 'id_language', expr: 'albums.id_language', text: true },
           { key: 'color', expr: 'albums.color', text: true },
           { key: 'subtitle', expr: slugs === null ? "''" : 'categories_albums.name' },
@@ -210,6 +212,7 @@ const albums: Resource = {
           { key: 'updated_at', expr: 'albums.updated_at' },
         ],
         from,
+        decor: 'LEFT JOIN files ON albums.id_file_image = files.id_file',
         tiebreak: 'albums.id_album ASC',
         distinct: true,
       },
@@ -252,7 +255,7 @@ const musics: Resource = {
   fillable: ['name', 'id_file_image', 'id_file_music', 'id_file_instrumental_music', 'id_language'],
   list: (base, query) => {
     const pre = languageFilter('musics.id_language', query)
-    let from = `musics ${MUSIC_FILES}`
+    let from = 'musics'
     const album = query.get('id_album')
     if (album !== null) {
       from += ' JOIN albums_musics ON albums_musics.id_music = musics.id_music'
@@ -269,6 +272,9 @@ const musics: Resource = {
           { key: 'updated_at', expr: 'musics.updated_at' },
         ],
         from,
+        decor: MUSIC_FILES,
+        table: 'musics',
+        counted: true,
         tiebreak: 'musics.id_music ASC',
       },
       pre,
@@ -332,16 +338,18 @@ const albumsMusics: Resource = {
       columns: [
         { key: 'id_album_music', expr: 'albums_musics.id_album_music' },
         { key: 'id_music', expr: 'albums_musics.id_music' },
-        { key: 'music_name', expr: 'musics.name', text: true },
+        { key: 'music_name', expr: 'musics.name', text: true, joined: true },
         { key: 'id_album', expr: 'albums_musics.id_album' },
-        { key: 'album_name', expr: 'albums.name', text: true },
+        { key: 'album_name', expr: 'albums.name', text: true, joined: true },
         { key: 'track', expr: 'albums_musics.track' },
         { key: 'id_language', expr: 'albums_musics.id_language', text: true },
       ],
-      from:
-        'albums_musics ' +
+      from: 'albums_musics',
+      decor:
         'LEFT JOIN musics ON albums_musics.id_music = musics.id_music ' +
         'LEFT JOIN albums ON albums_musics.id_album = albums.id_album',
+      table: 'albums_musics',
+      counted: true,
       tiebreak: 'albums_musics.id_album_music ASC',
     },
     pre: languageFilter('albums_musics.id_language', query),
@@ -384,7 +392,7 @@ const lyrics: Resource = {
   ],
   list: (_base, query) => {
     const pre = languageFilter('lyrics.id_language', query)
-    let from = 'lyrics LEFT JOIN musics ON musics.id_music = lyrics.id_music'
+    let from = 'lyrics'
     const album = query.get('id_album')
     if (album !== null) {
       from += ' JOIN albums_musics ON albums_musics.id_music = lyrics.id_music'
@@ -395,7 +403,7 @@ const lyrics: Resource = {
         columns: [
           { key: 'id_lyric', expr: 'lyrics.id_lyric' },
           { key: 'id_music', expr: 'lyrics.id_music' },
-          { key: 'music', expr: 'musics.name', text: true },
+          { key: 'music', expr: 'musics.name', text: true, joined: true },
           { key: 'lyric', expr: 'lyrics.lyric', text: true },
           { key: 'aux_lyric', expr: 'lyrics.aux_lyric', text: true },
           { key: 'id_file_image', expr: 'lyrics.id_file_image' },
@@ -406,6 +414,9 @@ const lyrics: Resource = {
           { key: 'id_language', expr: 'lyrics.id_language', text: true },
         ],
         from,
+        decor: 'LEFT JOIN musics ON musics.id_music = lyrics.id_music',
+        table: 'lyrics',
+        counted: true,
         tiebreak: 'lyrics.id_lyric ASC',
       },
       pre,
@@ -627,6 +638,8 @@ export const filesSpec = (base: string): ListSpec => ({
     { key: 'url', expr: fileUrl(base, 'files'), filter: false },
   ],
   from: 'files',
+  table: 'files',
+  counted: true,
   tiebreak: 'files.id_file ASC',
 })
 
