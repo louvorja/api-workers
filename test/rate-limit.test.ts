@@ -72,6 +72,20 @@ describe('rate limiting compatível com a API PHP', () => {
     expect(denied.limit).not.toHaveBeenCalled()
   })
 
+  // Várias rotas devolvem um Response montado à mão; os cabeçalhos do limite
+  // precisam chegar nelas também, não só nas que usam c.json.
+  it('informa o limite também nas respostas montadas à mão', async () => {
+    await env.FILES.put('meta/params.json', JSON.stringify({ db_version: 185 }))
+    await env.FILES.put('json_db/config.json', JSON.stringify({ version_number: 185 }))
+    for (const path of ['/params', '/json_db/config', '/pt']) {
+      const response = await call(path)
+      expect(response.status, path).toBe(200)
+      expect(response.headers.get('x-ratelimit-bucket'), path).toBe('general')
+      expect(response.headers.get('x-ratelimit-limit'), path).toBe('5000')
+      expect(response.headers.get('x-ratelimit-reset'), path).toMatch(/^\d+$/)
+    }
+  })
+
   it('params não depende do segredo do painel', async () => {
     await env.FILES.put('meta/params.json', JSON.stringify({ db_version: 185 }))
     const response = await call('/params', { JWT_SECRET: '' })
