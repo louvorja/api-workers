@@ -19,6 +19,20 @@ export const COMMON_HEADERS: Record<string, string> = {
 }
 
 /**
+ * /auth e /admin recebem escrita do painel, que roda em outra origem: o
+ * preflight precisa liberar POST, PUT e DELETE. E nada ali pode ir para o cache
+ * — a resposta depende de quem está autenticado.
+ */
+export const PRIVATE_HEADERS: Record<string, string> = {
+  ...COMMON_HEADERS,
+  'Access-Control-Allow-Methods': 'POST, GET, OPTIONS, PUT, DELETE',
+  'Cache-Control': 'no-store',
+}
+
+export const isPrivatePath = (path: string) =>
+  path.startsWith('/auth/') || path === '/admin' || path.startsWith('/admin/')
+
+/**
  * 404 no formato da API legada, sem vazar o caminho interno como o original
  * fazia. `no-store` é essencial: 404 é heuristicamente cacheável pela RFC 9111,
  * e guardar um na borda envenenaria a chave enquanto o acervo ainda é ingerido.

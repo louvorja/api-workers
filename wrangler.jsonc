@@ -35,10 +35,22 @@
     }
   ],
 
-  // O Worker não usa segredo em runtime — o R2 vem por binding. Declarar a
-  // lista vazia impede o wrangler de injetar as chaves de ingestão do .env
-  // como variáveis do Worker durante o dev.
-  "secrets": { "required": [] },
+  // Banco relacional do catálogo e do painel (/auth, /admin). Em `wrangler dev`
+  // o binding aponta para um SQLite local em .wrangler/, não para este banco.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "louvorja",
+      "database_id": "4705d209-b837-4cc3-b515-610470555605",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Declarar a lista impede o wrangler de injetar as chaves de ingestão do
+  // .env como variáveis do Worker durante o dev. JWT_SECRET assina os tokens do
+  // painel; em dev ele vem de .dev.vars. TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID
+  // são opcionais (aviso de alteração no catálogo) e por isso ficam de fora.
+  "secrets": { "required": ["JWT_SECRET"] },
 
   "vars": {
     // Espelha params.db_version da API legada. Entra no ETag/Cache-Control do

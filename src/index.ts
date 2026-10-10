@@ -1,18 +1,22 @@
 import { Hono } from 'hono'
+import { admin } from './features/admin.ts'
+import { auth } from './features/auth.ts'
 import { db } from './features/db.ts'
 import { files } from './features/files.ts'
 import { jsonDb } from './features/json-db.ts'
 import { legacy } from './features/legacy.ts'
 import { params } from './features/params.ts'
 import { rest } from './features/rest.ts'
-import { COMMON_HEADERS, notFound } from './lib/http.ts'
+import { requireSecret } from './lib/auth/session.ts'
+import { COMMON_HEADERS, isPrivatePath, notFound, PRIVATE_HEADERS } from './lib/http.ts'
 import type { App } from './types.ts'
 
 const app = new Hono<App>()
 
 app.use('*', async (c, next) => {
   await next()
-  for (const [k, v] of Object.entries(COMMON_HEADERS)) c.header(k, v)
+  const headers = isPrivatePath(c.req.path) ? PRIVATE_HEADERS : COMMON_HEADERS
+  for (const [k, v] of Object.entries(headers)) c.header(k, v)
 })
 
 app.options('*', (c) => c.body(null, 204))
@@ -44,6 +48,11 @@ app.route('/', db)
 app.route('/', files)
 app.route('/', params)
 app.route('/', legacy)
+// Antes do rest: /auth/me e /admin/musics casariam com /:lang/:collection.
+app.use('/auth/*', requireSecret)
+app.use('/admin/*', requireSecret)
+app.route('/', auth)
+app.route('/', admin)
 // Por último: a rota genérica /:lang/:collection casaria com /json_db, /db e
 // /file se viesse antes das rotas específicas.
 app.route('/', rest)

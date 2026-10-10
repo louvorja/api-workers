@@ -1,5 +1,12 @@
 /// <reference types="@cloudflare/vitest-pool-workers/types" />
 
-declare module 'cloudflare:test' {
-  interface ProvidedEnv extends Env {}
+import type { D1Migration } from 'cloudflare:test'
+
+// Bindings que só existem nos testes (ver vitest.config.ts).
+declare global {
+  namespace Cloudflare {
+    interface Env {
+      TEST_MIGRATIONS: D1Migration[]
+    }
+  }
 }
