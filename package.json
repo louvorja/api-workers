@@ -22,7 +22,16 @@
     "parity": "node --env-file=.env --experimental-strip-types scripts/parity.ts",
     "sync:media": "node --env-file=.env --experimental-strip-types scripts/sync-media.ts",
     "bench": "node --env-file=.env --experimental-strip-types scripts/bench.ts",
-    "ingest:rest": "node --env-file=.env --experimental-strip-types scripts/ingest-rest.ts"
+    "ingest:rest": "node --env-file=.env --experimental-strip-types scripts/ingest-rest.ts",
+    "d1:migrate": "wrangler d1 migrations apply louvorja --local",
+    "d1:snapshot": "node --env-file=.env --experimental-strip-types scripts/pull-snapshot.ts",
+    "d1:seed": "node --experimental-strip-types scripts/seed-d1.ts --snapshot=snapshot",
+    "d1:user": "node --experimental-strip-types scripts/create-user.ts",
+    "catalog:diff": "node --experimental-strip-types scripts/catalog-diff.ts",
+    "publish": "node --env-file=.env --experimental-strip-types scripts/publish.ts",
+    "admin:dev": "npm --prefix admin run dev",
+    "admin:build": "npm --prefix admin run build",
+    "admin:deploy": "npm --prefix admin run build && wrangler deploy --config admin/wrangler.jsonc"
   },
   "dependencies": {
     "hono": "^4.13.5"

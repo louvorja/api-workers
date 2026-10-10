@@ -13,3 +13,7 @@ missing-media.txt
 .ingest-state.json
 ingest-report.json
 media-report.json
+
+# Carga inicial do D1: retrato baixado do R2 e o SQL gerado a partir dele.
+snapshot/
+seed/
