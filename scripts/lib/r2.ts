@@ -29,6 +29,13 @@ export async function get(key: string): Promise<Uint8Array | null> {
   return new Uint8Array(await res.arrayBuffer())
 }
 
+export async function exists(key: string): Promise<boolean> {
+  const res = await aws.fetch(url(key), { method: 'HEAD' })
+  if (res.status === 404) return false
+  if (!res.ok) throw new Error(`HEAD ${key} -> ${res.status}`)
+  return true
+}
+
 /** Lista todas as chaves do bucket sob um prefixo, paginando os 1000 por página do S3. */
 export async function list(prefix = ''): Promise<string[]> {
   return [...(await listWithSizes(prefix)).keys()]

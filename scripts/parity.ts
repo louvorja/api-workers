@@ -110,12 +110,11 @@ for (const path of [
 
 console.log('\nparams e legado')
 {
-  const [a, b] = await Promise.all([
-    fetch(`${OLD}/params?type=env`, { headers: TOKEN ? { 'Api-Token': TOKEN } : {} }).then((r) =>
-      r.text(),
-    ),
-    fetch(`${NEW}/params?type=env`).then((r) => r.text()),
+  const [oldResponse, newResponse] = await Promise.all([
+    fetch(`${OLD}/params?type=env`, { headers: TOKEN ? { 'Api-Token': TOKEN } : {} }),
+    fetch(`${NEW}/params?type=env`),
   ])
+  const [a, b] = await Promise.all([oldResponse.text(), newResponse.text()])
   const keysOf = (t: string) =>
     new Set(
       t
@@ -123,11 +122,18 @@ console.log('\nparams e legado')
         .map((l) => l.split('=')[0])
         .filter(Boolean),
     )
-  const missing = [...keysOf(a)].filter((k) => !keysOf(b).has(k) && k !== 'conn_ftp')
+  const oldKeys = keysOf(a)
+  const newKeys = keysOf(b)
+  // conn_ftp fica de fora: o download por FTP foi descontinuado nesta API.
+  const missing = [...oldKeys].filter((k) => k !== 'conn_ftp' && !newKeys.has(k))
   check(
     'params?type=env',
-    missing.length === 0,
-    missing.length ? `faltam: ${missing.join(', ')}` : '',
+    oldResponse.ok && newResponse.ok && missing.length === 0,
+    !oldResponse.ok || !newResponse.ok
+      ? `status ${oldResponse.status} vs ${newResponse.status}`
+      : missing.length
+        ? `faltam: ${missing.join(', ')}`
+        : '',
   )
 }
 
@@ -199,7 +205,7 @@ const SIZE_DIVERGE =
 
 const DELIBERADAS: Record<string, Isencao> = {
   '/params': {
-    motivo: 'sem conn_ftp — o handshake FTP foi descontinuado',
+    motivo: 'conn_ftp só existe na origem: o download por FTP foi descontinuado',
     limpa: semChaves('conn_ftp'),
   },
   '/pt/files': { motivo: SIZE_DIVERGE, limpa: semCamposDosItens('size') },
@@ -216,7 +222,10 @@ const DELIBERADAS: Record<string, Isencao> = {
   },
   '/health': { motivo: 'diagnóstico do próprio runtime', incomparavel: true },
   '/version': { motivo: 'versão desta API, não do Lumen', incomparavel: true },
-  '/ftp': { motivo: 'responde 410; a origem tenta o handshake', incomparavel: true },
+  '/ftp': {
+    motivo: 'descontinuado: esta API responde 410 e manda baixar por HTTPS em /file',
+    incomparavel: true,
+  },
   '/player': { motivo: 'o id do vídeo é validado antes de entrar no HTML', incomparavel: true },
 }
 DELIBERADAS['/pt/configs'] = DELIBERADAS['/pt/config'] as Isencao

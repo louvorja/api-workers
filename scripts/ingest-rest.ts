@@ -18,6 +18,7 @@
 import { readFileSync } from 'node:fs'
 import { fetchLegacy, pool } from './lib/legacy.ts'
 import { mediaPath, normalizedMediaPath } from './lib/media.ts'
+import { publicApiUrl } from './lib/public-api.ts'
 import * as r2 from './lib/r2.ts'
 
 const args = new Map(
@@ -48,7 +49,7 @@ const idsMudados = (prefixo: 'music' | 'album'): number[] =>
     .filter((v): v is string => Boolean(v))
     .map(Number)
 
-const NEW_API = 'https://api.louvorja.workers.dev'
+const NEW_API = publicApiUrl(process.env.PUBLIC_API_URL)
 const OLD_API = 'https://api.louvorja.com.br'
 const LANGS = ['pt', 'es'] as const
 const COLLECTIONS = [

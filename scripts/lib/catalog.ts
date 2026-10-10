@@ -18,6 +18,153 @@ import { foldSql } from '../../src/lib/sql.ts'
 
 type Row = Record<string, unknown>
 
+export const BIBLE_SEED_COMPLETE_KEY = 'bible_seed_complete'
+
+export type BiblePublicationState =
+  | { source: 'bootstrap'; verses: number }
+  | {
+      source: 'd1'
+      verses: number
+      chapters: number
+      expectedChapters: number
+      versions: number
+      books: number
+    }
+
+type BibleVersionCoverage = { id: number; language: string }
+type BibleBookCoverage = { id: number; language: string; chapters: number }
+
+const integer = (value: unknown, label: string, minimum = 0): number => {
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < minimum) {
+    throw new Error(`${label} inválido: ${String(value)}`)
+  }
+  return parsed
+}
+
+/**
+ * O seed bíblico pode levar vários dias no limite gratuito do D1. Enquanto o
+ * último arquivo não gravar o marcador, a publicação mantém o retrato estático
+ * que já está no R2. Depois do marcador, a cobertura completa é conferida antes
+ * de o D1 virar a fonte dos capítulos.
+ */
+export function inspectBiblePublication(db: DatabaseSync): BiblePublicationState {
+  const marker = db
+    .prepare('SELECT value FROM configs WHERE key = ?')
+    .get(BIBLE_SEED_COMPLETE_KEY) as Row | undefined
+  const verseCount = integer(
+    (db.prepare('SELECT count(*) AS total FROM bible_verse').get() as Row | undefined)?.total ?? 0,
+    'total de versículos',
+  )
+
+  if (String(marker?.value ?? '') !== '1') {
+    return { source: 'bootstrap', verses: verseCount }
+  }
+  if (verseCount === 0) {
+    throw new Error(
+      `${BIBLE_SEED_COMPLETE_KEY}=1, mas bible_verse está vazia; remova o marcador ou conclua o seed`,
+    )
+  }
+
+  const versions = db
+    .prepare('SELECT id_bible_version, id_language FROM bible_version ORDER BY id_bible_version')
+    .all()
+    .map((row) => ({
+      id: integer(row.id_bible_version, 'id_bible_version', 1),
+      language: String(row.id_language),
+    })) as BibleVersionCoverage[]
+  const books = db
+    .prepare('SELECT id_bible_book, id_language, chapters FROM bible_book ORDER BY id_bible_book')
+    .all()
+    .map((row) => ({
+      id: integer(row.id_bible_book, 'id_bible_book', 1),
+      language: String(row.id_language),
+      chapters: integer(row.chapters, 'bible_book.chapters', 1),
+    })) as BibleBookCoverage[]
+
+  if (versions.length === 0 || books.length === 0) {
+    throw new Error(
+      `${BIBLE_SEED_COMPLETE_KEY}=1 sem metadados completos de bible_version/bible_book`,
+    )
+  }
+
+  const versionLanguages = new Set(versions.map((version) => version.language))
+  const bookLanguages = new Set(books.map((book) => book.language))
+  for (const language of new Set([...versionLanguages, ...bookLanguages])) {
+    if (!versionLanguages.has(language) || !bookLanguages.has(language)) {
+      throw new Error(`metadados bíblicos incompletos para o idioma ${language}`)
+    }
+  }
+
+  const expected = new Set<string>()
+  for (const version of versions) {
+    for (const book of books) {
+      if (book.language !== version.language) continue
+      for (let chapter = 1; chapter <= book.chapters; chapter++) {
+        expected.add(`${version.id}:${book.id}:${chapter}`)
+      }
+    }
+  }
+  if (expected.size === 0) throw new Error('nenhum capítulo bíblico esperado pelos metadados')
+
+  const versionById = new Map(versions.map((version) => [version.id, version]))
+  const bookById = new Map(books.map((book) => [book.id, book]))
+  const actual = new Set<string>()
+  let countedVerses = 0
+  const chapterRows = db
+    .prepare(
+      'SELECT id_bible_version, id_bible_book, chapter, id_language, count(*) AS verses ' +
+        'FROM bible_verse GROUP BY id_bible_version, id_bible_book, chapter, id_language ' +
+        'ORDER BY id_bible_version, id_bible_book, chapter, id_language',
+    )
+    .all() as Row[]
+
+  for (const row of chapterRows) {
+    const versionId = integer(row.id_bible_version, 'bible_verse.id_bible_version', 1)
+    const bookId = integer(row.id_bible_book, 'bible_verse.id_bible_book', 1)
+    const chapter = integer(row.chapter, 'bible_verse.chapter', 1)
+    const verses = integer(row.verses, 'versículos do capítulo', 1)
+    const language = String(row.id_language)
+    const version = versionById.get(versionId)
+    const book = bookById.get(bookId)
+    if (!version || !book) {
+      throw new Error(`capítulo bíblico referencia versão/livro ausente: ${versionId}/${bookId}`)
+    }
+    if (version.language !== language || book.language !== language || chapter > book.chapters) {
+      throw new Error(
+        `capítulo bíblico fora dos metadados: ${versionId}/${bookId}/${chapter} (${language})`,
+      )
+    }
+    const key = `${versionId}:${bookId}:${chapter}`
+    if (actual.has(key)) throw new Error(`capítulo bíblico duplicado entre idiomas: ${key}`)
+    actual.add(key)
+    countedVerses += verses
+  }
+
+  if (countedVerses !== verseCount) {
+    throw new Error(`contagem bíblica inconsistente: ${countedVerses} de ${verseCount} versículos`)
+  }
+  const missing = [...expected].filter((key) => !actual.has(key))
+  const unexpected = [...actual].filter((key) => !expected.has(key))
+  if (missing.length > 0 || unexpected.length > 0) {
+    const sample = (items: string[]) => items.slice(0, 6).join(', ')
+    throw new Error(
+      `${BIBLE_SEED_COMPLETE_KEY}=1, mas a carga está incompleta: ` +
+        `${missing.length} capítulo(s) ausente(s)${missing.length ? ` (${sample(missing)})` : ''}, ` +
+        `${unexpected.length} inesperado(s)${unexpected.length ? ` (${sample(unexpected)})` : ''}`,
+    )
+  }
+
+  return {
+    source: 'd1',
+    verses: verseCount,
+    chapters: actual.size,
+    expectedChapters: expected.size,
+    versions: versions.length,
+    books: books.length,
+  }
+}
+
 const HAS_INSTRUMENTAL = 'iif(ifnull(m.id_file_instrumental_music, 0) > 0, 1, 0)'
 const url = (alias: string) => `(${alias}.dir || '/' || ${alias}.file_name)`
 const SEARCH_TEXT =

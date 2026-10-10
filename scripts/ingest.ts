@@ -29,6 +29,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fetchLegacy, pool } from './lib/legacy.ts'
 import { mediaPath, normalizedMediaPath } from './lib/media.ts'
+import { publicApiUrl } from './lib/public-api.ts'
 import * as r2 from './lib/r2.ts'
 import * as pipeline from './lib/state.ts'
 
@@ -41,7 +42,7 @@ const ONLY = args.get('only') ? new RegExp(args.get('only') as string) : null
 
 const MISSING_FILE = 'missing-media.txt'
 const REPORT_FILE = 'ingest-report.json'
-const NEW_API = 'https://api.louvorja.workers.dev'
+const NEW_API = publicApiUrl(process.env.PUBLIC_API_URL)
 
 const encoder = new TextEncoder()
 const missingMedia = new Set<string>()
@@ -86,7 +87,8 @@ async function ingestMeta() {
   const res = await fetchLegacy('/params?type=json')
   if (res.status === 200) {
     const raw = JSON.parse(new TextDecoder().decode(res.body)) as Record<string, unknown>
-    // conn_ftp sai: o download por FTP foi substituído por HTTPS em /file.
+    // A URL da origem carrega autorização própria e não pode ser espelhada; o
+    // download por FTP foi descontinuado nesta API.
     const { conn_ftp: _drop, ...rest } = raw
     // Só string é reapontada. Coagir tudo com String() transformava valores
     // numéricos como db_version=185 em "185", e o cliente compara com ===.

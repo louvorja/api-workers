@@ -20,8 +20,12 @@ export type Plan = {
   removed: string[]
 }
 
-/** Os capítulos da Bíblia são estáticos: a publicação nunca os gera nem apaga. */
-const isBible = (table: string) => /^bible_\d/.test(table)
+export const isBibleTable = (table: string) => /^bible_\d/.test(table)
+
+export interface JsonDbPlanOptions {
+  /** Mantém capítulos publicados que não vieram no mapa gerado durante o bootstrap do D1. */
+  preserveBible?: boolean
+}
 
 /**
  * /json_db: uma tabela só é regravada quando os bytes mudam. O hash do
@@ -32,30 +36,51 @@ export function planJsonDb(
   generated: Map<string, string>,
   published: (table: string) => string | null,
   manifest: ManifestEntry[],
-): Plan & { manifest: ManifestEntry[] } {
+  options: JsonDbPlanOptions = {},
+): Plan & { manifest: ManifestEntry[]; manifestChanged: boolean } {
   const plan: Plan = { puts: [], deletes: [], changed: [], added: [], removed: [] }
   const known = new Set(manifest.map((entry) => entry.table))
-  const hashes = new Map<string, string>()
+  const hashes = new Map([...generated].map(([table, json]) => [table, md5(json)]))
+  const preserveBible = options.preserveBible ?? true
 
   for (const [table, json] of generated) {
     const current = published(table)
     if (current === json) continue
     plan.puts.push({ key: `json_db/${table}.json`, body: json })
-    hashes.set(table, md5(json))
     if (current === null && !known.has(table)) plan.added.push(table)
     else plan.changed.push(table)
   }
 
   const next: ManifestEntry[] = []
+  const included = new Set<string>()
   for (const entry of manifest) {
-    if (!isBible(entry.table) && !generated.has(entry.table)) {
+    if (!generated.has(entry.table)) {
+      if (preserveBible && isBibleTable(entry.table)) {
+        if (!included.has(entry.table)) {
+          included.add(entry.table)
+          next.push(entry)
+        }
+        continue
+      }
       plan.removed.push(entry.table)
       plan.deletes.push(`json_db/${entry.table}.json`)
       continue
     }
-    next.push({ ...entry, hash: hashes.get(entry.table) ?? entry.hash })
+    if (included.has(entry.table)) continue
+    included.add(entry.table)
+    next.push({
+      file: `${entry.table}.json`,
+      table: entry.table,
+      path: `/db/${entry.table}`,
+      hash: hashes.get(entry.table) as string,
+    })
   }
-  for (const table of plan.added) {
+
+  // Também repara manifesto ausente depois de uma falha entre o upload do ZIP
+  // e o do manifesto: o conteúdo já publicado não precisa ser reenviado.
+  for (const table of generated.keys()) {
+    if (included.has(table)) continue
+    included.add(table)
     next.push({
       file: `${table}.json`,
       table,
@@ -63,19 +88,12 @@ export function planJsonDb(
       hash: hashes.get(table) as string,
     })
   }
-  // Tabela que mudou e, por alguma falha anterior, não estava no manifesto.
-  for (const table of plan.changed) {
-    if (!known.has(table)) {
-      next.push({
-        file: `${table}.json`,
-        table,
-        path: `/db/${table}`,
-        hash: hashes.get(table) as string,
-      })
-    }
-  }
 
-  return { ...plan, manifest: next }
+  return {
+    ...plan,
+    manifest: next,
+    manifestChanged: JSON.stringify(next) !== JSON.stringify(manifest),
+  }
 }
 
 /**
@@ -108,6 +126,39 @@ export function planRest(
 
 export type Config = Record<string, string | number>
 
+/** Onde a publicação anota até que ponto da auditoria o que está no ar reflete. */
+export const PUBLISHED_LOG_KEY = 'state/published-log.json'
+
+/**
+ * `head` é o maior id da tabela de auditoria; `stored`, o conteúdo da marca no
+ * bucket. Marca ausente ou ilegível conta como alteração: na dúvida, publica.
+ */
+export function publishedLogChanged(head: number, stored: string | null): boolean {
+  if (stored === null) return true
+  try {
+    const published = (JSON.parse(stored) as { id_log?: unknown }).id_log
+    return typeof published !== 'number' || published !== head
+  } catch {
+    return true
+  }
+}
+
+/** Converte o `updated_at` UTC do catálogo para o número comparado pelo Delphi/PHP. */
+export function updatedAtVersion(updatedAtUtc: string): number {
+  const value = updatedAtUtc.trim()
+  const iso = /(?:Z|[+-]\d\d:\d\d)$/.test(value) ? value : `${value.replace(' ', 'T')}Z`
+  const milliseconds = Date.parse(iso)
+  if (!Number.isFinite(milliseconds)) throw new Error(`updated_at inválido: ${updatedAtUtc}`)
+  return Math.floor(milliseconds / 1000)
+}
+
+export function catalogVersionChanged(
+  currentVersion: string | number | undefined,
+  latestUpdatedUtc: string,
+): boolean {
+  return Number(currentVersion) !== updatedAtVersion(latestUpdatedUtc)
+}
+
 /**
  * O servidor de origem roda no fuso de São Paulo, e é nele que `configs` guarda
  * data e hora. O Brasil não tem horário de verão desde 2019: são sempre 3 horas.
@@ -122,12 +173,13 @@ const saoPaulo = (instant: Date) =>
  * `latestUpdatedUtc` vem das tabelas, que no D1 guardam as datas em UTC.
  */
 export function nextConfig(current: Config, latestUpdatedUtc: string, now: Date): Config {
-  const latest = new Date(`${latestUpdatedUtc.replace(' ', 'T')}Z`)
+  const version = updatedAtVersion(latestUpdatedUtc)
+  const latest = new Date(version * 1000)
   const stamp = saoPaulo(now)
   return {
     ...current,
     version_number: Number(current.version_number ?? 0) + 1,
-    version: Math.floor(latest.getTime() / 1000),
+    version,
     latest_updated: saoPaulo(latest),
     date: stamp.slice(0, 10),
     time: stamp.slice(11),
