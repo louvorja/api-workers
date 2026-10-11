@@ -47,10 +47,7 @@
     "online-videos:refresh": "node --env-file-if-exists=.env --experimental-strip-types scripts/refresh-online-videos.ts",
     "test:online-videos-refresh": "node --experimental-strip-types --test test/refresh-online-videos.node.ts",
     "slides:import": "node --env-file-if-exists=.env --experimental-strip-types scripts/import-slides.ts",
-    "test:slides-import": "node --experimental-strip-types --test test/import-slides.node.ts",
-    "admin:dev": "npm --prefix admin run dev",
-    "admin:build": "npm --prefix admin run build",
-    "admin:deploy": "npm --prefix admin run build && wrangler deploy --config admin/wrangler.jsonc"
+    "test:slides-import": "node --experimental-strip-types --test test/import-slides.node.ts"
   },
   "dependencies": {
     "hono": "^4.13.13"

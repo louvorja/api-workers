@@ -7,8 +7,9 @@ arquivos que os apps leem.
 - API: `https://api.louvorja.workers.dev`
 - Swagger UI: `/documentation`
 - OpenAPI: `/openapi.json`
-- Painel: pasta [`admin/`](admin/), publicada como o Worker estático `adm`
-  (`https://adm.louvorja.workers.dev`).
+- Painel: `https://adm.louvorja.com.br`, no repositório
+  [`louvorja/adm`](https://github.com/louvorja/adm) (GitHub Pages). Ele chama
+  esta API por `https://api.louvorja.com.br`.
 
 Tudo roda no plano gratuito da Cloudflare. As decisões abaixo existem para
 caber nele; mude-as sabendo o que cada uma protege.
@@ -225,8 +226,10 @@ O painel usa:
 
 - `/auth/login`, refresh, logout, usuário atual e troca de senha;
 - CRUD de usuários, categorias, vínculos, álbuns, músicas e letras em `/admin`;
-- consulta de arquivos em `/admin/files`;
-- `/tasks/*`, que agenda o workflow `maintenance.yml`.
+- consulta de arquivos em `/admin/files`.
+
+`/tasks/*` agenda o workflow `maintenance.yml` para quem chama a API com sessão
+de administrador; o painel não tem tela para isso.
 
 As listagens públicas preservam a paginação do Laravel e os filtros legados
 (`like:`, `orlike:`, `or:`, `sort_by`, `limit`, relações e idioma). As
@@ -333,7 +336,6 @@ Requisitos: Node 22, `zip`, `unzip` e `ffprobe` (pacote `ffmpeg`).
 npm ci
 cp .env.example .env
 npm run dev          # API em http://localhost:8787
-npm run admin:dev    # painel, apontando para a API local
 npm run type-check
 npm test
 npm run lint
@@ -381,7 +383,8 @@ servidor antigo; só o use se ele passar a apontar para este Worker.
 1. termine a carga inicial e aplique as migrations;
 2. grave o segredo: `npx wrangler secret put JWT_SECRET`;
 3. crie o administrador e rode `cutover:check`;
-4. publique o Worker (`npm run deploy`) e o painel (`npm run admin:deploy`);
+4. publique o Worker (`npm run deploy`); o painel é publicado pelo repositório
+   `louvorja/adm`, a cada commit na `main` de lá;
 5. confirme o login e a troca de senha no painel;
 6. rode a primeira publicação à mão (`workflow_dispatch`, tarefa `publish`) e
    confira os apps;
