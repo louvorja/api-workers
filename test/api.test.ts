@@ -313,3 +313,36 @@ describe('REST', () => {
     }
   })
 })
+
+describe('catálogo menor e manifestos por domínio', () => {
+  it('preserva a rota completa e entrega catálogo/manifesto correspondente ao domínio', async () => {
+    for (const [host, variant] of [
+      ['api.test', 'files'],
+      ['api.louvorja.com.br', 'legacy'],
+    ]) {
+      await env.FILES.put(`meta/catalog-bundle-${variant}.zip`, `catalog-${variant}`)
+      await env.FILES.put(`meta/bundle-${variant}.zip`, `full-${variant}`)
+      await env.FILES.put(`meta/manifest-${variant}.json`, JSON.stringify([{ hash: variant }]))
+      for (const [path, expected] of [
+        ['/db/catalog-bundle', `catalog-${variant}`],
+        ['/db/bundle', `full-${variant}`],
+      ]) {
+        const response = await worker.fetch(
+          new Request(`https://${host}${path}`),
+          env,
+          createExecutionContext(),
+        )
+        expect(new TextDecoder().decode(await response.arrayBuffer())).toBe(expected)
+      }
+      for (const path of ['/db/manifest', '/json_db']) {
+        const response = await worker.fetch(
+          new Request(`https://${host}${path}`),
+          env,
+          createExecutionContext(),
+        )
+        expect(await response.json()).toEqual([{ hash: variant }])
+        expect(response.headers.get('cache-control')).toMatch(/^private/)
+      }
+    }
+  })
+})

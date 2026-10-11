@@ -9,7 +9,7 @@
  *   node --env-file=.env --experimental-strip-types scripts/publish.ts --export=replica.sql [--write]
  *
  * A Bíblia é estática e fica como está no bucket: os capítulos publicados são
- * preservados e o pacote bíblico não é regerado. Só se alguém carregar os
+ * preservados, inclusive quando os pacotes ganham novos manifestos. Só se alguém carregar os
  * versículos no D1 (`seed-d1.ts --bible`, fora do plano) eles passam a sair
  * da réplica junto com o resto.
  */
@@ -28,7 +28,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { BUNDLE_KEY } from '../src/lib/media-urls.ts'
-import { type BundleVariant, buildBundleVariants } from './lib/bundle-variants.ts'
+import { type BundleArtifact, buildBundleArtifacts } from './lib/bundle-variants.ts'
 import { generateBible, generateCatalog, inspectBiblePublication } from './lib/catalog.ts'
 import { assertCutoverAdmin } from './lib/cutover.ts'
 import { localD1 } from './lib/d1-local.ts'
@@ -309,44 +309,30 @@ const upload = (key: string, body: string | Uint8Array, type = 'application/json
 
 // Atualiza primeiro o diretório de trabalho: o ZIP sai do mesmo retrato que
 // será enviado ao R2.
-let zipPath: string | null = null
-let bundleVariants: BundleVariant[] = []
-if (jsonDb.puts.length > 0 || jsonDb.deletes.length > 0) {
+let bundleVariants: BundleArtifact[] = []
+if (
+  jsonDb.puts.length > 0 ||
+  jsonDb.deletes.length > 0 ||
+  jsonDb.manifestChanged ||
+  publishBibleBundle
+) {
   for (const put of jsonDb.puts) writeFileSync(join(workdir, 'json', put.key.slice(8)), put.body)
   for (const key of jsonDb.deletes) {
     const path = join(workdir, 'json', key.slice(8))
     if (existsSync(path)) unlinkSync(path)
   }
-  zipPath = join(workdir, 'bundle-new.zip')
-  execFileSync('zip', ['-qq', '-r', '-X', zipPath, '.'], { cwd: bundleDir })
   // Os pacotes com endereço de mídia saem do mesmo retrato. Se ficassem para
   // trás, a API entregaria o catálogo anterior a quem instala pelo pacote.
-  bundleVariants = buildBundleVariants(bundleDir, workdir)
-}
-
-let bibleZipPath: string | null = null
-if (publishBibleBundle) {
-  const bibleBundleDir = join(workdir, 'bible-bundle')
-  mkdirSync(bibleBundleDir)
-  for (const [table, json] of bibleCatalog) {
-    if (!isBibleTable(table)) throw new Error(`chave de capítulo bíblico inválida: ${table}`)
-    writeFileSync(join(bibleBundleDir, `${table}.json`), json)
-  }
-  bibleZipPath = join(workdir, 'bible-bundle.zip')
-  execFileSync('zip', ['-qq', '-r', '-X', bibleZipPath, '.'], { cwd: bibleBundleDir })
+  bundleVariants = buildBundleArtifacts(bundleDir, workdir)
 }
 
 await pool([...jsonDb.puts, ...restPlan.puts], 8, (put) => upload(put.key, put.body))
 await pool([...jsonDb.deletes, ...restPlan.deletes], 8, (key) => r2.del(key))
 
-if (zipPath) {
-  await upload(BUNDLE_KEY, readFileSync(zipPath), 'application/zip')
-}
 for (const variant of bundleVariants) {
-  await upload(variant.key, readFileSync(variant.path), 'application/zip')
+  await upload(variant.key, readFileSync(variant.path), variant.contentType)
 }
-if (bibleZipPath) {
-  await upload(BIBLE_BUNDLE_KEY, readFileSync(bibleZipPath), 'application/zip')
+if (publishBibleBundle) {
   await upload(
     BIBLE_STATE_KEY,
     JSON.stringify({
@@ -357,9 +343,6 @@ if (bibleZipPath) {
       published_at: new Date().toISOString(),
     }),
   )
-}
-if (jsonDb.manifestChanged) {
-  await upload('meta/manifest.json', JSON.stringify(jsonDb.manifest))
 }
 
 if (config) {

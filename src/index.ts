@@ -37,6 +37,7 @@ app.get('/', async (c) => {
       '/json_db/:key',
       '/db/manifest',
       '/db/bundle',
+      '/db/catalog-bundle',
       '/db/bible-bundle',
       '/db/:key',
       '/file/*',
@@ -55,6 +56,7 @@ app.get('/', async (c) => {
         'ZIP com todos os capítulos da Bíblia, um arquivo bible_{versão}_{livro}_{capítulo}.json ' +
         'por capítulo. Para baixar a Bíblia inteira, use este arquivo em vez de pedir ' +
         '/json_db/bible_... capítulo por capítulo.',
+      '/db/catalog-bundle': 'ZIP com o catálogo sem capítulos bíblicos, para a instalação inicial.',
       '/db/bundle': 'ZIP com todas as tabelas do catálogo (álbuns, músicas, hinário e Bíblia).',
     },
     db_version: current.db_version ?? null,

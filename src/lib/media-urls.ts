@@ -58,3 +58,12 @@ export function withMediaUrls(text: string, variant: MediaVariant): string {
     return `"${key}":${JSON.stringify(url)}`
   })
 }
+
+export const CATALOG_VARIANT_KEYS: Record<MediaVariant, string> = {
+  current: 'meta/catalog-bundle-files.zip',
+  legacy: 'meta/catalog-bundle-legacy.zip',
+}
+export const MANIFEST_VARIANT_KEYS: Record<MediaVariant, string> = {
+  current: 'meta/manifest-files.json',
+  legacy: 'meta/manifest-legacy.json',
+}

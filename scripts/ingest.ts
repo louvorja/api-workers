@@ -16,17 +16,10 @@
  *     [--force] [--only=<regex>] [--concurrency=8]
  */
 import { execFileSync } from 'node:child_process'
-import {
-  copyFileSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { buildBundleArtifacts } from './lib/bundle-variants.ts'
 import { fetchLegacy, pool } from './lib/legacy.ts'
 import { mediaPath, normalizedMediaPath } from './lib/media.ts'
 import { publicApiUrl } from './lib/public-api.ts'
@@ -190,48 +183,27 @@ if (todo.length > 0 || bibleBundleMissing) {
     }
   })
 
-  // A Bíblia tem milhares de arquivos pequenos. O app baixa este ZIP uma vez
-  // ao abrir uma tela bíblica, em vez de abrir uma requisição por capítulo.
-  const bibleSourceDir = join(workdir, 'json')
-  const bibleBundleDir = join(workdir, 'bible-bundle')
-  const bibleFiles = readdirSync(bibleSourceDir).filter((file) =>
-    /^bible_\d+_\d+_\d+\.json$/.test(file),
+  if (failed > 0)
+    throw new Error(`Ingestão incompleta: ${failed} tabelas falharam; pacotes não publicados`)
+  // Unchanged entries must come from R2 too: the origin ZIP can have different
+  // serialization or media paths. A subset (--only) must not publish other changes.
+  const changed = new Set(todo.map((entry) => entry.table))
+  await pool(
+    manifest.filter((entry) => !changed.has(entry.table)),
+    CONCURRENCY,
+    async (entry) => {
+      const body = await r2.get(`json_db/${entry.table}.json`)
+      if (body === null) throw new Error(`Snapshot incompleto: ${entry.table}`)
+      writeFileSync(join(workdir, 'json', entry.file), body)
+    },
   )
-  if (bibleFiles.length === 0) throw new Error('bundle não trouxe capítulos bíblicos')
-  mkdirSync(bibleBundleDir)
-  for (const file of bibleFiles) {
-    copyFileSync(join(bibleSourceDir, file), join(bibleBundleDir, file))
-  }
-  const bibleZip = join(workdir, 'bible-bundle.zip')
-  execFileSync('zip', ['-qq', '-r', '-X', bibleZip, '.'], { cwd: bibleBundleDir })
-  const bibleZipped = readFileSync(bibleZip)
-  await r2.put('meta/bible-bundle.zip', bibleZipped, 'application/zip')
-  console.log(
-    `  meta/bible-bundle.zip republicado (${(bibleZipped.length / 1048576).toFixed(1)}MB, ${bibleFiles.length} capítulos)`,
-  )
-
-  // Republica o bundle com os JSONs já reescritos, para /db/bundle sair desta
-  // API coerente com o que /json_db serve — o da origem ainda aponta .mp3. Sem
-  // tabela alterada os JSONs aqui são os da origem, então não se republica.
-  if (todo.length > 0) {
-    const outZip = join(workdir, 'rewritten.zip')
-    execFileSync('zip', ['-qq', '-r', '-X', outZip, '.'], { cwd: join(workdir, 'json') })
-    const zipped = readFileSync(outZip)
-    await r2.put('meta/bundle.zip', zipped, 'application/zip')
-    console.log(`  meta/bundle.zip republicado (${(zipped.length / 1048576).toFixed(1)}MB)`)
+  for (const artifact of buildBundleArtifacts(join(workdir, 'json'), workdir)) {
+    await r2.put(artifact.key, readFileSync(artifact.path), artifact.contentType)
   }
 }
 
 await pipeline.save({ ...estado, tables: state })
 rmSync(workdir, { recursive: true, force: true })
-
-// O manifesto vai para o bucket com os paths apontando para esta API, para que
-// /db/manifest seja servido daqui sem depender da origem.
-await r2.put(
-  'meta/manifest.json',
-  encoder.encode(JSON.stringify(manifest.map((e) => ({ ...e, path: e.path })))),
-  'application/json',
-)
 
 console.log(`\n${saved} tabelas gravadas, ${failed} falharam`)
 

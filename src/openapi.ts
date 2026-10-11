@@ -177,7 +177,8 @@ export const openapi = {
       get: {
         tags: ['Banco estático'],
         summary: 'Índice das tabelas, com hash MD5',
-        description: 'Use o `hash` para sincronizar só o que mudou.',
+        description:
+          'MD5 dos bytes JSON finais de /json_db/{key}, conforme o domínio da API. O ZIP também inclui um manifesto interno SHA-256.',
         responses: { 200: { description: '18.060 entradas.' } },
       },
     },
@@ -191,13 +192,22 @@ export const openapi = {
         responses: { 200: { description: 'application/zip.' }, 404: NOT_FOUND },
       },
     },
+    '/db/catalog-bundle': {
+      get: {
+        tags: ['Banco estático'],
+        summary: 'ZIP do catálogo sem capítulos bíblicos',
+        description:
+          'Pacote menor para instalação inicial. Inclui _bundle_manifest.json com tipo, tamanho e SHA-256 de cada JSON.',
+        responses: { 200: { description: 'application/zip.' }, 404: NOT_FOUND },
+      },
+    },
     '/db/bible-bundle': {
       get: {
         tags: ['Banco estático'],
         summary: 'ZIP com a Bíblia inteira',
         description:
           'Todos os capítulos de todas as versões em uma requisição (cerca de 26 MB). ' +
-          'Cada entrada do ZIP é um `bible_{versão}_{livro}_{capítulo}.json` com o mesmo ' +
+          'Além de _bundle_manifest.json, cada entrada do ZIP é um `bible_{versão}_{livro}_{capítulo}.json` com o mesmo ' +
           'conteúdo de `/json_db/bible_{versão}_{livro}_{capítulo}`. As versões e os livros ' +
           'estão em `/json_db/{pt,es}_bible_version` e `/json_db/{pt,es}_bible_book`. ' +
           'É o caminho para quem quer a Bíblia completa: rotina agendada, cópia offline ou busca.',

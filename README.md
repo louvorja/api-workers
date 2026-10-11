@@ -138,10 +138,25 @@ Worker que os utiliza. A publicação normal também os mantém atualizados.
 catálogos antigos. Os endereços diretos entregues pelo catálogo e pelo REST
 usam a extensão que existe no armazenamento e não dependem dessa troca.
 
-O pacote tem uma cópia por variante (`meta/bundle-files.zip` e
-`meta/bundle-legacy.zip`), geradas a cada publicação junto com
-`meta/bundle.zip`, que guarda os caminhos sem endereço e serve de reserva. Para
-regerá-las sem publicar o catálogo: `npm run bundle:variants -- --write`.
+O pacote completo mantém `/db/bundle` e as variantes `meta/bundle-files.zip` e
+`meta/bundle-legacy.zip`; `meta/bundle.zip` é a base com caminhos relativos.
+`/db/catalog-bundle` entrega o catálogo sem capítulos, por domínio, a partir de
+`meta/catalog-bundle-files.zip` ou `meta/catalog-bundle-legacy.zip`.
+`/db/bible-bundle` entrega somente capítulos.
+
+Todos os ZIPs incluem `_bundle_manifest.json` (`schema_version: 1`, `kind`:
+`full`, `catalog` ou `bible`, e `files: [{ name, bytes, sha256 }]`). O publicador
+confere os capítulos esperados pelos metadados e referências de músicas/álbuns
+antes de construir os pacotes. O cliente valida CRC e o conjunto exato de JSONs,
+mais tamanho/SHA-256 por arquivo. Os manifestos públicos mantêm o formato antigo
+com MD5, calculado sobre os bytes finais de cada domínio; `meta/manifest.json`
+representa a base interna, e `meta/manifest-files.json`/`meta/manifest-legacy.json`
+as respostas públicas.
+
+`npm run bundle:variants -- --write` regenera todos esses artefatos a partir da
+base publicada, sem incrementar a versão do catálogo nem alterar os bancos FTP.
+O app web `louvorja/app` lê `/json_db/{key}` individualmente e não depende do nome
+do objeto ZIP. A rota `/db/bundle` continua completa para clientes existentes.
 
 O app novo aceita endereço completo desde a beta.12; versões anteriores
 montavam o endereço por conta própria e ficam sem capa e sem áudio. A versão

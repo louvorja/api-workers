@@ -14,7 +14,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BUNDLE_KEY } from '../src/lib/media-urls.ts'
-import { buildBundleVariants } from './lib/bundle-variants.ts'
+import { buildBundleArtifacts } from './lib/bundle-variants.ts'
 import * as r2 from './lib/r2.ts'
 
 const write = process.argv.includes('--write')
@@ -29,12 +29,10 @@ try {
   writeFileSync(join(workdir, 'bundle.zip'), bundle)
   execFileSync('unzip', ['-qq', '-o', join(workdir, 'bundle.zip'), '-d', jsonDir])
 
-  for (const variant of buildBundleVariants(jsonDir, workdir)) {
+  for (const variant of buildBundleArtifacts(jsonDir, workdir)) {
     const megabytes = (statSync(variant.path).size / 1e6).toFixed(1)
-    console.log(
-      `${variant.key}: ${megabytes} MB, ${variant.rewritten} tabelas com endereços de mídia`,
-    )
-    if (write) await r2.put(variant.key, readFileSync(variant.path), 'application/zip')
+    console.log(`${variant.key}: ${megabytes} MB`)
+    if (write) await r2.put(variant.key, readFileSync(variant.path), variant.contentType)
   }
   console.log(write ? 'Enviado ao R2.' : 'Simulação: nada foi enviado (use --write).')
 } finally {

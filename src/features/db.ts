@@ -3,6 +3,8 @@ import { COMMON_HEADERS, notFound } from '../lib/http.ts'
 import {
   BUNDLE_KEY,
   BUNDLE_VARIANT_KEYS,
+  CATALOG_VARIANT_KEYS,
+  MANIFEST_VARIANT_KEYS,
   mediaVariantFor,
   withMediaUrls,
 } from '../lib/media-urls.ts'
@@ -28,7 +30,12 @@ const CATALOG_CACHE = 'private, max-age=3600'
 export const db = new Hono<App>()
 
 db.on(['GET', 'HEAD'], '/db/manifest', async (c) => {
-  const res = await serveObject(c.env.FILES, 'meta/manifest.json', c.req.raw, SNAPSHOT_CACHE)
+  const res = await serveObject(
+    c.env.FILES,
+    MANIFEST_VARIANT_KEYS[mediaVariantFor(new URL(c.req.url).hostname)],
+    c.req.raw,
+    CATALOG_CACHE,
+  )
   return res ?? notFound(c)
 })
 
@@ -37,6 +44,12 @@ db.on(['GET', 'HEAD'], '/db/manifest', async (c) => {
 db.on(['GET', 'HEAD'], '/db/bible-bundle', async (c) => {
   const res = await serveObject(c.env.FILES, 'meta/bible-bundle.zip', c.req.raw, BIBLE_CACHE)
   return res ?? notFound(c)
+})
+
+// O pacote inicial não traz capítulos; /db/bundle continua sendo a restauração completa.
+db.on(['GET', 'HEAD'], '/db/catalog-bundle', async (c) => {
+  const key = CATALOG_VARIANT_KEYS[mediaVariantFor(new URL(c.req.url).hostname)]
+  return (await serveObject(c.env.FILES, key, c.req.raw, CATALOG_CACHE)) ?? notFound(c)
 })
 
 // Precisa vir antes de /db/:key, senão o curinga tenta ler json_db/bundle.json.
