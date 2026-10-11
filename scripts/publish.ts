@@ -47,6 +47,7 @@ import {
 } from './lib/publication.ts'
 import * as r2 from './lib/r2.ts'
 import { generateRest } from './lib/rest.ts'
+import { reconcileRestMedia } from './lib/rest-media.ts'
 
 const args = new Map(
   process.argv.slice(2).map((a) => a.replace(/^--/, '').split('=') as [string, string]),
@@ -101,8 +102,20 @@ console.log(
 )
 
 async function rest() {
+  const [current, originals] = await Promise.all([
+    r2.mediaSizes(),
+    r2.listWithSizes('musics/', 'files-original'),
+  ])
+  const legacy = new Map([...current].filter(([key]) => !key.startsWith('musics/')))
+  for (const [key, size] of originals) legacy.set(key, size)
   const out = new Map<string, string>()
-  for await (const [key, json] of generateRest(localD1(db), API)) out.set(key, json)
+  for await (const [key, json] of generateRest(localD1(db), API)) {
+    const currentJson = reconcileRestMedia(json, current)
+    out.set(key, currentJson)
+    if (/^(pt|es)_files$/.test(key)) {
+      out.set(`${key}_legacy`, reconcileRestMedia(currentJson, legacy, 'legacy'))
+    }
+  }
   return out
 }
 

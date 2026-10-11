@@ -41,12 +41,23 @@ export async function list(prefix = ''): Promise<string[]> {
   return [...(await listWithSizes(prefix)).keys()]
 }
 
+/** O inventário de mídia exclui snapshots, pacotes e estado da publicação. */
+export async function mediaSizes(): Promise<Map<string, number>> {
+  const inventories = await Promise.all(
+    ['covers/', 'images/', 'musics/'].map((prefix) => listWithSizes(prefix)),
+  )
+  return new Map(inventories.flatMap((inventory) => [...inventory]))
+}
+
 /**
  * Chaves e tamanhos sob um prefixo. O `<Size>` já vem no mesmo `<Contents>` da
  * listagem, então sai de graça — e é o que permite ao snapshot declarar o
  * tamanho do arquivo que o acervo tem de fato, e não o da origem legada.
  */
-export async function listWithSizes(prefix = ''): Promise<Map<string, number>> {
+export async function listWithSizes(
+  prefix = '',
+  bucketName = bucket,
+): Promise<Map<string, number>> {
   const objetos = new Map<string, number>()
   let token: string | undefined
 
@@ -54,7 +65,7 @@ export async function listWithSizes(prefix = ''): Promise<Map<string, number>> {
     const q = new URLSearchParams({ 'list-type': '2', prefix, 'max-keys': '1000' })
     if (token) q.set('continuation-token', token)
 
-    const res = await aws.fetch(`${endpoint}/${bucket}?${q}`)
+    const res = await aws.fetch(`${endpoint}/${bucketName}?${q}`)
     if (!res.ok) throw new Error(`LIST -> ${res.status}`)
     const xml = await res.text()
 

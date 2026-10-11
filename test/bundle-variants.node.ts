@@ -39,7 +39,7 @@ test('gera um pacote por variante, com os endereços de mídia de cada uma', () 
     assert.deepEqual(JSON.parse(unzipped(legacy.path, 'music_1.json')), {
       id_music: 1,
       url_music: 'https://mp3.louvorja.com.br/musics/pt/A/B.mp3',
-      url_image: 'https://api.louvorja.com.br/file/images/x.jpg',
+      url_image: 'https://files.louvorja.com.br/images/x.jpg',
     })
     // O que não tem mídia entra igual nas duas variantes.
     for (const { path } of variants) {

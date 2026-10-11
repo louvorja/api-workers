@@ -1,5 +1,6 @@
 import { type Context, Hono } from 'hono'
 import { COMMON_HEADERS, notFound } from '../lib/http.ts'
+import { type MediaVariant, mediaVariantFor, withMediaUrls } from '../lib/media-urls.ts'
 import { paginate } from '../lib/paginate.ts'
 import { foldText } from '../lib/sql.ts'
 import type { App } from '../types.ts'
@@ -14,15 +15,26 @@ const DOWNLOAD_LOGS_PER_DAY = 500
 
 export const rest = new Hono<App>()
 
-function json(body: unknown, cache = CACHE): Response {
+function json(body: unknown, cache = CACHE, variant?: MediaVariant): Response {
   const headers = new Headers(COMMON_HEADERS)
   headers.set('Content-Type', 'application/json')
   headers.set('Cache-Control', cache)
-  return new Response(JSON.stringify(body), { headers })
+  const text = JSON.stringify(body)
+  return new Response(variant ? withMediaUrls(text, variant) : text, { headers })
+}
+
+/** Mídia e paginação dependem do domínio: não podem usar o cache compartilhado. */
+function catalogJson(c: Context<App>, body: unknown): Response {
+  return json(body, 'private, max-age=3600', mediaVariantFor(new URL(c.req.url).hostname))
 }
 
 /** Lê uma coleção do snapshot REST em rest/. */
 async function load<T>(c: Context<App>, key: string): Promise<T | null> {
+  // Os MP3 originais têm tamanhos diferentes dos arquivos Opus. A publicação
+  // prepara os dois registros para a lista de downloads continuar verificável.
+  if (/^(pt|es)_files$/.test(key) && mediaVariantFor(new URL(c.req.url).hostname) === 'legacy') {
+    key += '_legacy'
+  }
   const object = await c.env.FILES.get(`rest/${key}.json`)
   return object === null ? null : await object.json<T>()
 }
@@ -601,7 +613,7 @@ for (const path of ['/:lang/musics/:id', '/:lang/music/:id']) {
     const id = c.req.param('id') as string
     if (!LANGS.has(lang) || !ID_RE.test(id)) return notFound(c)
     const data = await load<Row>(c, `${lang}_music_${id}`)
-    return data === null ? notFound(c) : json({ data })
+    return data === null ? notFound(c) : catalogJson(c, { data })
   })
 }
 
@@ -616,7 +628,7 @@ rest.get('/:lang/hymnal/:id', async (c) => {
   if (!LANGS.has(lang) || !ID_RE.test(id)) return notFound(c)
   const rows = await load<Row[]>(c, `${lang}_hymnal`)
   const hymn = rows?.find((h) => String(h.id_music) === id)
-  return hymn === undefined ? notFound(c) : json(hymn)
+  return hymn === undefined ? notFound(c) : catalogJson(c, hymn)
 })
 
 rest.get('/:lang/categories/:id/albums-with-musics', async (c) => {
@@ -624,7 +636,7 @@ rest.get('/:lang/categories/:id/albums-with-musics', async (c) => {
   const id = c.req.param('id') as string
   if (!LANGS.has(lang) || !ID_RE.test(id)) return notFound(c)
   const data = await load<unknown>(c, `${lang}_category_${id}_awm`)
-  return data === null ? notFound(c) : json(data)
+  return data === null ? notFound(c) : catalogJson(c, data)
 })
 
 /**
@@ -664,7 +676,7 @@ for (const path of ['/:lang/albums/:id', '/:lang/album/:id']) {
     const id = c.req.param('id') as string
     if (!LANGS.has(lang) || !ID_RE.test(id)) return notFound(c)
     const data = await load<Row>(c, `${lang}_album_${id}`)
-    return data === null ? notFound(c) : json({ data })
+    return data === null ? notFound(c) : catalogJson(c, { data })
   })
 }
 
@@ -675,7 +687,7 @@ rest.get('/:lang/albums/category/:slug', async (c) => {
   const slug = c.req.param('slug') as string
   if (!LANGS.has(lang) || !SLUG_RE.test(slug)) return notFound(c)
   const rows = await load<Row[]>(c, `${lang}_categoryslug_${slug}_albums`)
-  return rows === null ? notFound(c) : json(paginate(rows, new URL(c.req.url)))
+  return rows === null ? notFound(c) : catalogJson(c, paginate(rows, new URL(c.req.url)))
 })
 
 rest.get('/:lang/categories/:id/albums', async (c) => {
@@ -683,7 +695,7 @@ rest.get('/:lang/categories/:id/albums', async (c) => {
   const id = c.req.param('id') as string
   if (!LANGS.has(lang) || !ID_RE.test(id)) return notFound(c)
   const rows = await load<Row[]>(c, `${lang}_category_${id}_albums`)
-  return rows === null ? notFound(c) : json(paginate(rows, new URL(c.req.url)))
+  return rows === null ? notFound(c) : catalogJson(c, paginate(rows, new URL(c.req.url)))
 })
 
 rest.get('/:lang/collections/online', async (c) => {
@@ -760,5 +772,5 @@ rest.get('/:lang/:collection', async (c) => {
   const filtered = filterRows(related, name, spec, url)
   const page = paginate(sortRows(filtered, name, spec, url), url, pageSize(url))
   page.data = await expandRelations(c, lang, name, page.data as Row[], url)
-  return json(page)
+  return catalogJson(c, page)
 })

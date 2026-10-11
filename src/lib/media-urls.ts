@@ -16,11 +16,11 @@ export const FILES_URL = 'https://files.louvorja.com.br'
 export const ORIGINALS_URL = 'https://mp3.louvorja.com.br'
 
 /**
- * - `current`: apps atuais. Tudo sai do armazenamento, com o nome exato do
- *   arquivo guardado.
- * - `legacy`: app web antigo e app Android. O áudio sai sempre em `.mp3`, do
- *   armazenamento dos originais, porque navegadores de iPhones mais velhos não
- *   tocam Opus. Capas e imagens continuam pela API, como a API antiga fazia.
+ * Capas e imagens saem sempre de `FILES_URL`. Só o áudio muda:
+ *
+ * - `current`: apps atuais. O arquivo guardado, com o nome exato (Opus ou MP3).
+ * - `legacy`: app web antigo e app Android. Sempre `.mp3`, do armazenamento
+ *   dos originais, porque navegadores de iPhones mais velhos não tocam Opus.
  */
 export type MediaVariant = 'current' | 'legacy'
 
@@ -34,16 +34,27 @@ export const BUNDLE_VARIANT_KEYS: Record<MediaVariant, string> = {
   legacy: 'meta/bundle-legacy.zip',
 }
 
-const MEDIA_FIELD = /"(url_[a-z_]+)":"\/(covers|images|musics)\/((?:[^"\\]|\\.)*)"/g
+const MEDIA_FIELD = /"(url(?:_[a-z_]+)?)":("(?:[^"\\]|\\.)*")/g
+const MEDIA_PATH =
+  /^(?:(?:https:\/\/(?:api\.louvorja\.workers\.dev|api\.louvorja\.com\.br))?\/file|https:\/\/files\.louvorja\.com\.br)?\/(covers|images|musics)\/(.+)$/
+
+/** Só endereços do nosso acervo; URLs externas e links de paginação ficam intactos. */
+export function catalogMediaPath(value: string): string | null {
+  const match = MEDIA_PATH.exec(value)
+  return match ? `${match[1]}/${match[2]}` : null
+}
 
 /** Troca os caminhos de mídia de um JSON do catálogo pelos endereços completos. */
 export function withMediaUrls(text: string, variant: MediaVariant): string {
   // A maior tabela (a lista de músicas) não tem mídia: evita varrê-la à toa.
-  if (!text.includes('"url_')) return text
-  return text.replace(MEDIA_FIELD, (_match, key: string, dir: string, rest: string) => {
-    if (variant === 'current') return `"${key}":"${FILES_URL}/${dir}/${rest}"`
-    return dir === 'musics'
-      ? `"${key}":"${ORIGINALS_URL}/musics/${rest.replace(/\.opus$/, '.mp3')}"`
-      : `"${key}":"https://${LEGACY_HOST}/file/${dir}/${rest}"`
+  if (!text.includes('"url')) return text
+  return text.replace(MEDIA_FIELD, (match, key: string, encoded: string) => {
+    const path = catalogMediaPath(JSON.parse(encoded) as string)
+    if (path === null) return match
+    const url =
+      variant === 'legacy' && path.startsWith('musics/')
+        ? `${ORIGINALS_URL}/${path.replace(/\.opus(?=[?#]|$)/, '.mp3')}`
+        : `${FILES_URL}/${path}`
+    return `"${key}":${JSON.stringify(url)}`
   })
 }

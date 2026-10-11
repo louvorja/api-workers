@@ -41,21 +41,12 @@ const forCurrent = {
   ],
 }
 
-// Apps antigos: áudio sempre em .mp3, do armazenamento dos originais; capas e
-// imagens pela API, como a API antiga fazia.
+// Apps antigos: só o áudio muda. Sai sempre em .mp3, do armazenamento dos
+// originais. Nada de mídia passa pela API.
 const forLegacy = {
-  ...music,
-  url_image: 'https://api.louvorja.com.br/file/images/hasd_018.jpg',
+  ...forCurrent,
   url_music: 'https://mp3.louvorja.com.br/musics/pt/Hinário/Santo, Santo.mp3',
   url_instrumental_music: 'https://mp3.louvorja.com.br/musics/pt/Hinário/Santo, Santo - PB.mp3',
-  albums: [{ id_album: 1, url_image: 'https://api.louvorja.com.br/file/covers/hasd.jpg' }],
-  lyric: [
-    {
-      id_lyric: 1,
-      lyric: 'veja /images/x.jpg no texto',
-      url_image: 'https://api.louvorja.com.br/file/images/slide.png',
-    },
-  ],
 }
 
 beforeAll(async () => {
@@ -163,6 +154,22 @@ describe('pacote do catálogo', () => {
 })
 
 describe('troca dos caminhos de mídia', () => {
+  it('reescreve URLs de mídia do REST sem tocar na paginação nem em hosts externos', () => {
+    const source = {
+      url_music: `${CURRENT}/file/musics/pt/A.opus`,
+      url_image: `${LEGACY}/file/covers/a.jpg`,
+      url: `${CURRENT}/file/images/a.jpg`,
+      next_page_url: `${LEGACY}/pt/musics?page=2`,
+      external: { url_image: 'https://example.com/images/a.jpg' },
+    }
+    expect(JSON.parse(withMediaUrls(JSON.stringify(source), 'legacy'))).toEqual({
+      ...source,
+      url_music: 'https://mp3.louvorja.com.br/musics/pt/A.mp3',
+      url_image: 'https://files.louvorja.com.br/covers/a.jpg',
+      url: 'https://files.louvorja.com.br/images/a.jpg',
+    })
+  })
+
   it('preserva aspas escapadas dentro do nome do arquivo', () => {
     const text = JSON.stringify({ url_music: '/musics/pt/A "B".opus', other: '/musics/x.opus' })
     expect(JSON.parse(withMediaUrls(text, 'current'))).toEqual({
@@ -182,4 +189,87 @@ describe('troca dos caminhos de mídia', () => {
     expect(withMediaUrls(absolute, 'current')).toBe(absolute)
     expect(withMediaUrls(absolute, 'legacy')).toBe(absolute)
   })
+})
+
+describe('endereços de mídia nas rotas REST', () => {
+  it('serve a lista de arquivos com o tamanho da variante e preserva filtros', async () => {
+    const current = {
+      id_file: 91,
+      name: 'A.mp3',
+      size: 200,
+      url: `${CURRENT}/file/musics/pt/A.opus`,
+    }
+    const legacy = { ...current, size: 500, url: `${CURRENT}/file/musics/pt/A.mp3` }
+    await env.FILES.put('rest/pt_files.json', JSON.stringify([current]))
+    await env.FILES.put('rest/pt_files_legacy.json', JSON.stringify([legacy]))
+    for (const [origin, row, url] of [
+      [CURRENT, current, 'https://files.louvorja.com.br/musics/pt/A.opus'],
+      [LEGACY, legacy, 'https://mp3.louvorja.com.br/musics/pt/A.mp3'],
+    ] as const) {
+      const response = await get(`${origin}/pt/files?id_file=91`)
+      expect(response.headers.get('cache-control')).toBe('private, max-age=3600')
+      expect(((await response.json()) as { data: unknown[] }).data).toEqual([{ ...row, url }])
+    }
+  })
+
+  beforeAll(async () => {
+    const stored = JSON.parse(JSON.stringify(music).replaceAll('\":\"/', `\":\"${CURRENT}/file/`))
+    for (const lang of ['pt', 'es']) {
+      for (const key of [
+        'musics',
+        'hymnal',
+        'albums',
+        'categoryslug_doxology_albums',
+        'category_9_albums',
+      ]) {
+        await env.FILES.put(
+          `rest/${lang}_${key}.json`,
+          JSON.stringify([stored, { ...stored, id_music: 8 }]),
+        )
+      }
+      for (const key of ['music_7', 'album_3']) {
+        await env.FILES.put(`rest/${lang}_${key}.json`, JSON.stringify(stored))
+      }
+      await env.FILES.put(`rest/${lang}_category_9_awm.json`, JSON.stringify({ albums: [stored] }))
+    }
+  })
+
+  for (const [origin, expected] of [
+    [LEGACY, forLegacy],
+    [CURRENT, forCurrent],
+  ] as const) {
+    for (const lang of ['pt', 'es']) {
+      it(`aplica a variante em listas, itens e relações de ${origin}/${lang}`, async () => {
+        for (const path of [
+          'musics',
+          'hymnal',
+          'albums',
+          'albums/category/doxology',
+          'categories/9/albums',
+        ]) {
+          const response = await get(`${origin}/${lang}/${path}`)
+          expect(response.headers.get('cache-control')).toBe('private, max-age=3600')
+          const body = (await response.json()) as {
+            data: unknown[]
+            path: string
+            first_page_url: string
+            links: { url: string | null }[]
+          }
+          expect(body.data[0]).toEqual(expected)
+          expect(body.path).toBe(`${origin}/${lang}/${path}`)
+          expect(body.first_page_url).toBe(`${origin}/${lang}/${path}?page=1`)
+          expect(body.links.every((link) => !link.url || link.url.startsWith(`${origin}/`))).toBe(
+            true,
+          )
+        }
+        for (const path of ['musics/7', 'music/7', 'albums/3', 'album/3']) {
+          expect(await (await get(`${origin}/${lang}/${path}`)).json()).toEqual({ data: expected })
+        }
+        expect(await (await get(`${origin}/${lang}/hymnal/7`)).json()).toEqual(expected)
+        expect(
+          await (await get(`${origin}/${lang}/categories/9/albums-with-musics`)).json(),
+        ).toEqual({ albums: [expected] })
+      })
+    }
+  }
 })

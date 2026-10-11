@@ -34,6 +34,7 @@
     "publish": "node --env-file-if-exists=.env --experimental-strip-types scripts/publish.ts",
     "publish:gate": "node --env-file-if-exists=.env --experimental-strip-types scripts/publish-gate.ts",
     "bundle:variants": "node --env-file-if-exists=.env --experimental-strip-types scripts/bundle-variants.ts",
+    "rest:media": "node --env-file-if-exists=.env --experimental-strip-types scripts/rest-media.ts",
     "test:bible-publication": "node --experimental-strip-types --test test/bible-publication.node.ts",
     "files:reconcile": "node --env-file-if-exists=.env --experimental-strip-types scripts/reconcile-files.ts",
     "test:files-reconcile": "node --experimental-strip-types --test test/reconcile-files.node.ts",

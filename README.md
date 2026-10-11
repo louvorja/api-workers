@@ -44,7 +44,7 @@ banco. `/health` faz um `SELECT 1`, que não lê linha nenhuma.
 
 Cada resposta sem cache é uma requisição a mais no teto diário de 100 mil do
 plano gratuito (resposta `304` também conta). O catálogo fica em cache no
-cliente e na borda:
+cliente; respostas iguais nos dois domínios também podem ficar na borda:
 
 | Rotas | Cache |
 | --- | --- |
@@ -101,13 +101,14 @@ O catálogo é guardado com o caminho do arquivo dentro do armazenamento
 (`/musics/...`, `/covers/...`, `/images/...`). Quem lê recebe o endereço
 completo, e ele aponta direto para o armazenamento: arquivo entregue por
 `/file` conta na cota diária de requisições do Worker. A troca é feita em
-`src/lib/media-urls.ts` e vale para `/json_db`, `/db` e o pacote `/db/bundle`.
+`src/lib/media-urls.ts` e vale para `/json_db`, `/db`, o pacote `/db/bundle`
+e as listas/itens REST em `/pt` e `/es`, inclusive relações de álbuns e letras.
 O domínio do pedido decide a variante:
 
 | Pedido por | Quem é | Áudio | Capas e imagens |
 | --- | --- | --- | --- |
 | `api.louvorja.workers.dev` | apps atuais | `files.louvorja.com.br`, com o nome exato do arquivo (Opus ou MP3) | `files.louvorja.com.br` |
-| `api.louvorja.com.br` | app web antigo e app Android | `mp3.louvorja.com.br`, sempre `.mp3` | `api.louvorja.com.br/file` |
+| `api.louvorja.com.br` | app web antigo e app Android | `mp3.louvorja.com.br`, sempre `.mp3` | `files.louvorja.com.br` |
 
 - `files.louvorja.com.br` é o bucket `files`: a melhor versão de cada arquivo.
   Metade do acervo está em Opus; a outra metade ficou em MP3 porque o original
@@ -120,6 +121,22 @@ O domínio do pedido decide a variante:
 Como a resposta muda conforme o domínio e o cache do Worker tem uma chave só
 para todos eles, essas rotas saem com `Cache-Control: private`. A Bíblia não
 tem mídia, sai igual em todo domínio e continua no cache compartilhado.
+Nas listas REST, isso também preserva o domínio nos links de paginação:
+um cliente antigo não deve acabar em `workers.dev` ao abrir a próxima página.
+
+As URLs REST são conferidas contra as chaves reais do armazenamento durante
+a publicação. A lista `/files` tem um retrato adicional por idioma
+(`rest/{lang}_files_legacy.json`), com os tamanhos dos MP3 originais. Assim
+`size` corresponde ao arquivo indicado em `url` em ambos os domínios.
+Para corrigir só a mídia dos retratos existentes, sem publicar alterações do
+D1 nem mudar `db_version`: `npm run rest:media` simula;
+`npm run rest:media -- --write` grava e relê o resultado, preservando uma cópia
+local dos objetos anteriores. Prepare esses retratos antes de implantar o
+Worker que os utiliza. A publicação normal também os mantém atualizados.
+
+`/file` conserva a compatibilidade entre extensões para instalações com
+catálogos antigos. Os endereços diretos entregues pelo catálogo e pelo REST
+usam a extensão que existe no armazenamento e não dependem dessa troca.
 
 O pacote tem uma cópia por variante (`meta/bundle-files.zip` e
 `meta/bundle-legacy.zip`), geradas a cada publicação junto com
