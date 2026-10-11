@@ -72,6 +72,37 @@ describe('FTP entregue ao Delphi', () => {
   })
 
   // /params pode ser servido do cache por uma hora e vencido por mais um dia.
+  // O Delphi busca os vídeos online no endereço de `coletaneas_online`. No
+  // workers.dev a Cloudflare responde 403 à identificação dele.
+  it('entrega com o domínio antigo todo endereço desta API em /params', async () => {
+    await env.FILES.put(
+      'meta/params.json',
+      JSON.stringify({
+        db_version: 185,
+        coletaneas_online: 'https://api.louvorja.workers.dev/onlinevideos',
+        version_log: 'https://api.louvorja.workers.dev/version_log',
+        help: 'https://louvorja.com.br/ajuda/',
+        pt_download: 'https://github.com/louvorja/desktop/releases/download/v1/x.exe',
+      }),
+    )
+    try {
+      for (const origin of ['https://api.louvorja.workers.dev', 'https://api.louvorja.com.br']) {
+        const ctx = createExecutionContext()
+        const response = await worker.fetch(new Request(`${origin}/params`), env, ctx)
+        await waitOnExecutionContext(ctx)
+        expect(await response.json()).toEqual({
+          db_version: 185,
+          coletaneas_online: 'https://api.louvorja.com.br/onlinevideos',
+          version_log: 'https://api.louvorja.com.br/version_log',
+          help: 'https://louvorja.com.br/ajuda/',
+          pt_download: 'https://github.com/louvorja/desktop/releases/download/v1/x.exe',
+        })
+      }
+    } finally {
+      await env.FILES.put('meta/params.json', JSON.stringify({ db_version: 185, help: 'x' }))
+    }
+  })
+
   it('emite um token que sobrevive ao cache de /params', async () => {
     const claims = claimsOf((await handshakeOf(on)).searchParams.get('token') ?? '')
     expect(claims.sub).toBe('ftp')

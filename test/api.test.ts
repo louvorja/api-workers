@@ -92,8 +92,28 @@ describe('file', () => {
     expect(res.headers.get('content-type')).toContain('image/jpeg')
   })
 
-  it('resolve .mp3 para o .opus do acervo', async () => {
-    const res = await call('/file/musics/pt/A/B.mp3')
+  // Quem pede .mp3 é quem só toca MP3: recebe o original, nunca o Opus.
+  it('manda ao armazenamento dos originais quem pede o .mp3 de uma faixa convertida', async () => {
+    const redirect = await call('/file/musics/pt/A/B.mp3')
+    expect(redirect.status).toBe(302)
+    expect(redirect.headers.get('location')).toBe('https://mp3.louvorja.com.br/musics/pt/A/B.mp3')
+    expect(redirect.headers.get('access-control-allow-origin')).toBe('*')
+
+    const accented = await call(
+      `/file/musics/pt/${encodeURIComponent('Hinário')}/Santo%2C%20Santo.mp3`,
+    )
+    expect(accented.headers.get('location')).toBe(
+      'https://mp3.louvorja.com.br/musics/pt/Hin%C3%A1rio/Santo%2C%20Santo.mp3',
+    )
+
+    const kept = await call('/file/musics/pt/A/So%20Mp3.mp3')
+    expect(kept.status).toBe(200)
+    expect(kept.headers.get('content-type')).toBe('audio/mpeg')
+    expect((await call('/file/covers/nao-existe.jpg')).status).toBe(404)
+  })
+
+  it('entrega o .opus do acervo pelo nome exato', async () => {
+    const res = await call('/file/musics/pt/A/B.opus')
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toContain('audio/ogg')
   })

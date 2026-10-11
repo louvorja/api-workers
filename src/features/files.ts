@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { COMMON_HEADERS, notFound } from '../lib/http.ts'
+import { ORIGINALS_URL } from '../lib/media-urls.ts'
 import { serveObject } from '../lib/r2.ts'
 import type { App } from '../types.ts'
 
@@ -15,7 +16,10 @@ import type { App } from '../types.ts'
  */
 function candidates(path: string): string[] {
   const lower = path.toLowerCase()
-  if (lower.endsWith('.mp3')) return [`${path.slice(0, -4)}.opus`, path]
+  // Quem pede `.mp3` recebe MP3: o que está aqui com esse nome, ou o original
+  // (ver o redirecionamento abaixo). Entregar o Opus com nome de MP3 deixava
+  // mudo quem só toca MP3, que é justamente quem ainda pede por esse nome.
+  if (lower.endsWith('.mp3')) return [path]
   if (lower.endsWith('.bmp')) return [`${path.slice(0, -4)}.jpg`, path]
   // Caminho inverso: os JSONs pedem .opus, mas parte do acervo veio de fontes
   // de 128 kbps, onde converter para Opus não economiza espaço e só acrescenta
@@ -61,6 +65,14 @@ files.on(['GET', 'HEAD'], '/file/*', async (c) => {
       'public, max-age=31536000, immutable',
     )
     if (res) return res
+  }
+
+  // A faixa foi convertida para Opus: o MP3 dela está no bucket dos originais.
+  if (path.startsWith('musics/') && path.toLowerCase().endsWith('.mp3')) {
+    const headers = new Headers(COMMON_HEADERS)
+    headers.set('Location', `${ORIGINALS_URL}/${path.split('/').map(encodeURIComponent).join('/')}`)
+    headers.set('Cache-Control', 'public, max-age=3600')
+    return new Response(null, { status: 302, headers })
   }
   return notFound(c)
 })

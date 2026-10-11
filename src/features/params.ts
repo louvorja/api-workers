@@ -14,6 +14,8 @@ function toIni(params: Record<string, unknown>): string {
     .join('\r\n')}\r\n`
 }
 
+const WORKERS_DEV_ORIGIN = 'https://api.louvorja.workers.dev'
+
 export const params = new Hono<App>()
 // É por aqui que o app descobre que há catálogo novo (`db_version`). Uma hora,
 // como o manifesto: é o atraso máximo para perceber uma publicação.
@@ -24,6 +26,14 @@ params.on(['GET', 'HEAD'], '/params', async (c) => {
   if (object === null) return notFound(c)
 
   const data = await object.json<Record<string, unknown>>()
+  // O Delphi chama os endereços que lê daqui (vídeos online, por exemplo), e a
+  // Cloudflare recusa a identificação dele no workers.dev. Tudo que aponta para
+  // esta API sai com o domínio antigo, que os apps novos também alcançam.
+  for (const [key, value] of Object.entries(data)) {
+    if (typeof value === 'string' && value.startsWith(`${WORKERS_DEV_ORIGIN}/`)) {
+      data[key] = FTP_HANDSHAKE_ORIGIN + value.slice(WORKERS_DEV_ORIGIN.length)
+    }
+  }
   // O Delphi só inicia a atualização se receber o endereço do aperto de mão do
   // FTP. A chave só existe enquanto houver um servidor de FTP configurado.
   if (ftpEnabled(c.env)) {
