@@ -57,19 +57,41 @@ O app acrescenta a data à URL de `/json_db` e um carimbo único quando o
 operador pede para atualizar, então o cache não segura conteúdo velho além do
 dia.
 
-### Sem FTP e sem Bíblia no banco
+### FTP do Delphi e Bíblia fora do banco
 
-- O download por FTP foi descontinuado. Workers não recebe conexões FTP, e
-  manter um servidor à parte duplicaria o acervo. `/ftp` responde `410` com a
-  indicação de baixar por HTTPS em `/file`. O banco SQLite do programa Delphi
-  também não é gerado.
+- Workers não recebe conexões FTP. O que este Worker faz é o aperto de mão
+  HTTPS do programa Delphi: `/params` anuncia `conn_ftp` e `/ftp` devolve host,
+  porta e credenciais de um servidor de FTP que existe à parte (hoje, o do
+  servidor antigo), lidos do secret `FTP_COMPAT_CONFIG`. O acervo em MP3 e o
+  banco SQLite do Delphi continuam vindo desse FTP; nada disso é gerado aqui.
+  Sem o secret, `/params` não anuncia `conn_ftp` e `/ftp` responde `410`.
 - A Bíblia não é editada pelo painel: os 404 mil versículos ficam como estão no
   R2 e a publicação não toca neles. `seed-d1.ts --bible` existe, mas carregá-los
   ocuparia cerca de 11 dias da cota de escrita e não é parte do plano.
 
+## O domínio da API antiga
+
+`api.louvorja.com.br` continua apontando para o servidor PHP, mas a maior parte
+das rotas é desviada para este Worker (lista em `routes`, no `wrangler.jsonc`),
+para tirar a carga dele. Ficam no servidor antigo:
+
+- `/auth`, `/admin` e `/tasks`: o painel antigo, que grava no MySQL;
+- `/file/musics`: o áudio em MP3 original;
+- `/health`.
+
+Quem chama `/json_db` por esse domínio é cliente antigo: o app web em
+`app.louvorja.com.br` usa os campos `url_*` como endereço pronto. Por isso, só
+nesse domínio, o catálogo sai com endereços completos e com o áudio em `.mp3`
+(servido pelo servidor antigo, porque navegadores de iPhones mais velhos não
+tocam Opus). Pelo `workers.dev` os apps recebem os caminhos relativos de sempre.
+
+Enquanto os dois sistemas existirem, `db_version` em `/params` precisa
+acompanhar o banco que está no FTP: o Delphi compara esse número com o dele e
+tenta atualizar quando o da API é maior.
+
 ## Contratos atendidos
 
-As rotas públicas incluem `/params`, `/onlinevideos`, `/file/*`, `/json_db/*`,
+As rotas públicas incluem `/params`, `/ftp`, `/onlinevideos`, `/file/*`, `/json_db/*`,
 `/db/*`, `/metadata`, `/download`, `/version`, `/version_log`, `/player` e as
 coleções sob `/{pt,es}/...`.
 
@@ -197,7 +219,9 @@ Bindings declarados em `wrangler.jsonc`:
   minuto equivalentes aos três grupos da API PHP;
 - `JWT_SECRET` (obrigatório): assinatura das sessões do painel;
 - `GITHUB_TASK_TOKEN` (opcional): token restrito a Actions para `/tasks`. Sem
-  ele, `/tasks` responde `503` e o resto funciona.
+  ele, `/tasks` responde `503` e o resto funciona;
+- `FTP_COMPAT_CONFIG` (opcional): JSON com o servidor de FTP entregue ao Delphi,
+  por idioma — `{"pt": {"host", "port", "root", "username", "password"}, "es": {…}}`.
 
 Os jobs usam `CLOUDFLARE_API_TOKEN`, credenciais S3 do R2 e, no job mensal,
 `YOUTUBE_API_KEY`. Segredos não entram em `wrangler.jsonc`, no R2 ou no Git.
