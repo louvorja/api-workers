@@ -54,6 +54,15 @@ export function ftpConnection(raw: string | undefined, lang: string): FtpConnect
 export const ftpEnabled = (env: Bindings) =>
   Boolean(env.JWT_SECRET) && ftpConnection(env.FTP_COMPAT_CONFIG, 'pt') !== null
 
+/**
+ * Domínio em que o Delphi busca os dados do FTP. É fixo, e não o do pedido: o
+ * cache de /params é um só para todos os domínios, e no workers.dev a
+ * Cloudflare recusa a identificação do Delphi ("Indy Library", erro 1010).
+ * Se `conn_ftp` saísse com o domínio de quem pediu primeiro, o Delphi podia
+ * ser mandado para um endereço que ele não consegue abrir.
+ */
+export const FTP_HANDSHAKE_ORIGIN = 'https://api.louvorja.com.br'
+
 /** URL que o Delphi lê em `conn_ftp`; ele acrescenta `&data=...&lang=...` e chama. */
 export async function ftpHandshakeUrl(origin: string, secret: string): Promise<string> {
   const now = Math.floor(Date.now() / 1000)

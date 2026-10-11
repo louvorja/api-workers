@@ -58,14 +58,16 @@ describe('FTP entregue ao Delphi', () => {
     const response = await call('/params', on)
     const body = (await response.json()) as Record<string, unknown>
     expect(body).toMatchObject({ db_version: 185, help: 'x' })
-    expect(String(body.conn_ftp)).toMatch(/^https:\/\/api\.test\/ftp\?token=/)
+    // Sempre o domínio antigo, qualquer que seja o domínio do pedido: é o único
+    // em que a Cloudflare deixa o Delphi passar, e o cache de /params é um só.
+    expect(String(body.conn_ftp)).toMatch(/^https:\/\/api\.louvorja\.com\.br\/ftp\?token=/)
     expect(response.headers.get('cache-control')).toBe(
       'public, max-age=3600, stale-while-revalidate=86400',
     )
 
     const ini = await (await call('/params?type=env', on)).text()
     expect(ini).toMatch(
-      /^db_version=185\r\nhelp=x\r\nconn_ftp=https:\/\/api\.test\/ftp\?token=.+\r\n$/,
+      /^db_version=185\r\nhelp=x\r\nconn_ftp=https:\/\/api\.louvorja\.com\.br\/ftp\?token=.+\r\n$/,
     )
   })
 
