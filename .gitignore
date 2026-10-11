@@ -17,3 +17,6 @@ media-report.json
 # Carga inicial do D1: retrato baixado do R2 e o SQL gerado a partir dele.
 snapshot/
 seed/
+media-normalize.sql
+media-normalize-report.json
+delphi-db-report.json

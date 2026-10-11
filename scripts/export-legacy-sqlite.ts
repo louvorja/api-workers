@@ -123,7 +123,57 @@ const SYSTEM_TABLES = [
   'jwt_blacklist',
   'row_counts',
   'slide_imports',
+  'public_write_budget',
 ] as const
+
+/**
+ * Tudo que o banco gerado pelo PHP tinha. Tabela nova do D1 que não esteja em
+ * SYSTEM_TABLES não pode vazar para o banco do Delphi: a geração para.
+ */
+const LEGACY_OBJECTS: ReadonlySet<string> = new Set([
+  'ALBUM',
+  'ALBUM_MUSICAS',
+  'ALBUM_TIPO',
+  'ARQUIVOS_ADICIONAIS',
+  'ARQUIVOS_SISTEMA',
+  'BIBLIA',
+  'DOXOLOGIA_ALBUNS',
+  'HINARIO_ADVENTISTA',
+  'HINARIO_ADVENTISTA_1996',
+  'IMAGEM_POSICAO',
+  'LISTA_COLETANEAS',
+  'LISTA_MUSICAS',
+  'LISTA_MUSICAS_ONL',
+  'LISTA_MUSICAS_PERSO',
+  'LISTA_MUSICAS_TODAS',
+  'LIVRO',
+  'MUSICAS',
+  'MUSICAS_INFANTIS',
+  'MUSICAS_LETRA',
+  'MUSICAS_SLIDE',
+  'ONL_CANAIS',
+  'ONL_PLAYLISTS',
+  'ONL_VIDEOS',
+  'TIPOS_ALBUM',
+  'VERSAO',
+  'VERSAO_BIBLICA',
+  '_ALBUM_IGNORAR',
+  '_COLETANEAS_PERSONALIZADAS',
+  'albums',
+  'albums_musics',
+  'bible_book',
+  'bible_verse',
+  'bible_version',
+  'categories',
+  'categories_albums',
+  'files',
+  'languages',
+  'lyrics',
+  'musics',
+  'online_videos',
+  'online_videos_channels',
+  'online_videos_playlists',
+])
 
 const BIBLE_COLUMNS = {
   bible_version: [
@@ -848,6 +898,22 @@ function buildLanguageDatabase(
 
     dropD1OnlyObjects(db)
     createLegacyObjects(db, language, version, audio)
+    const unknown = (
+      db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') " +
+            "AND name NOT LIKE 'sqlite_%' ORDER BY name",
+        )
+        .all() as Row[]
+    )
+      .map((object) => String(object.name))
+      .filter((name) => !LEGACY_OBJECTS.has(name))
+    if (unknown.length > 0) {
+      throw new Error(
+        `o banco ${language} sairia com objetos que o Delphi não conhece: ${unknown.join(', ')}; ` +
+          'inclua-os em SYSTEM_TABLES se forem internos da API',
+      )
+    }
     db.exec('COMMIT;')
     // A fonte da Bíblia é só leitura; solta antes do VACUUM e do optimize.
     if (bibleSource !== 'd1') db.exec('DETACH DATABASE bible_source')
