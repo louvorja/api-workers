@@ -92,21 +92,43 @@ para tirar a carga dele. Ficam no servidor antigo:
 
 - `/auth`, `/admin` e `/tasks`: o painel antigo, que grava no MySQL;
 - `/file/musics`: continua respondendo lá, mas o catálogo não aponta mais para
-  ele (ver abaixo);
+  ele (ver "Endereços de mídia do catálogo");
 - `/health`.
 
-Quem chama `/json_db` por esse domínio é cliente antigo: o app web em
-`app.louvorja.com.br` e o app Android usam os campos `url_*` como endereço
-pronto. Por isso, só nesse domínio, o catálogo sai com endereços completos e
-com o áudio em `.mp3`, porque navegadores de iPhones mais velhos não tocam
-Opus. Pelo `workers.dev` os apps recebem os caminhos relativos de sempre.
+### Endereços de mídia do catálogo
 
-O áudio desses clientes sai de `LEGACY_AUDIO_URL` (`mp3.louvorja.com.br`), um
-domínio ligado ao bucket `files-original`: a cópia dos 5.996 arquivos originais
-da API antiga (MP3, imagens e capas), com os mesmos nomes e pastas. Assim o
-áudio não passa pelo servidor PHP — que enviava o arquivo inteiro a cada
-pedido — nem conta na cota de requisições deste Worker. Sem a variável, o
-catálogo volta a apontar para `/file/musics` do próprio domínio.
+O catálogo é guardado com o caminho do arquivo dentro do armazenamento
+(`/musics/...`, `/covers/...`, `/images/...`). Quem lê recebe o endereço
+completo, e ele aponta direto para o armazenamento: arquivo entregue por
+`/file` conta na cota diária de requisições do Worker. A troca é feita em
+`src/lib/media-urls.ts` e vale para `/json_db`, `/db` e o pacote `/db/bundle`.
+O domínio do pedido decide a variante:
+
+| Pedido por | Quem é | Áudio | Capas e imagens |
+| --- | --- | --- | --- |
+| `api.louvorja.workers.dev` | apps atuais | `files.louvorja.com.br`, com o nome exato do arquivo (Opus ou MP3) | `files.louvorja.com.br` |
+| `api.louvorja.com.br` | app web antigo e app Android | `mp3.louvorja.com.br`, sempre `.mp3` | `api.louvorja.com.br/file` |
+
+- `files.louvorja.com.br` é o bucket `files`: a melhor versão de cada arquivo.
+  Metade do acervo está em Opus; a outra metade ficou em MP3 porque o original
+  é de 128 kbps e converter só acrescentaria perda.
+- `mp3.louvorja.com.br` é o bucket `files-original`: a cópia dos 5.996
+  arquivos originais da API antiga, com os mesmos nomes e pastas. Os clientes
+  antigos recebem só MP3 porque navegadores de iPhones mais velhos não tocam
+  Opus.
+
+Como a resposta muda conforme o domínio e o cache do Worker tem uma chave só
+para todos eles, essas rotas saem com `Cache-Control: private`. A Bíblia não
+tem mídia, sai igual em todo domínio e continua no cache compartilhado.
+
+O pacote tem uma cópia por variante (`meta/bundle-files.zip` e
+`meta/bundle-legacy.zip`), geradas a cada publicação junto com
+`meta/bundle.zip`, que guarda os caminhos sem endereço e serve de reserva. Para
+regerá-las sem publicar o catálogo: `npm run bundle:variants -- --write`.
+
+O app novo aceita endereço completo desde a beta.12; versões anteriores
+montavam o endereço por conta própria e ficam sem capa e sem áudio. A versão
+web precisa ter `files.louvorja.com.br` na política de conteúdo dela.
 
 Enquanto os dois sistemas existirem, `db_version` em `/params` precisa
 acompanhar o banco que está no FTP: o Delphi compara esse número com o dele e

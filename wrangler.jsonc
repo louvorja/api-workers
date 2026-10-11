@@ -13,8 +13,8 @@
   // do servidor PHP, que continua por trás do mesmo endereço. O que não está
   // listado segue indo para ele:
   // - /auth, /admin e /tasks: o painel antigo, que grava no MySQL;
-  // - /file/musics: o MP3 original. O /json_db daqui já não aponta para ele
-  //   (ver LEGACY_AUDIO_URL), mas quem tem endereço antigo guardado ainda usa;
+  // - /file/musics: o MP3 original. O catálogo já não aponta para ele (ver
+  //   src/lib/media-urls.ts), mas quem tem endereço antigo guardado ainda usa;
   // - /health: para continuar medindo o servidor antigo.
   // O FTP do programa Delphi não passa por HTTP: /ftp só entrega o endereço dele.
   // A zona vai pelo identificador: existe outra com o mesmo nome (a antiga, já
@@ -105,9 +105,6 @@
 
   "vars": {
     "GITHUB_TASK_REF": "main",
-    "GITHUB_TASK_REPO": "louvorja/api-workers",
-    // Armazenamento com os MP3 originais (bucket files-original). O catálogo
-    // do domínio antigo aponta o áudio para cá, e não mais para o servidor PHP.
-    "LEGACY_AUDIO_URL": "https://mp3.louvorja.com.br"
+    "GITHUB_TASK_REPO": "louvorja/api-workers"
   }
 }

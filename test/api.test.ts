@@ -295,7 +295,8 @@ describe('REST', () => {
     expect(await cacheOf('/db/bible-bundle')).toBe(
       'public, max-age=86400, stale-while-revalidate=604800',
     )
-    expect(await cacheOf('/db/config')).toBe('public, max-age=3600, stale-while-revalidate=86400')
+    // Mesmo motivo de /json_db: a tabela leva endereços que mudam conforme o domínio.
+    expect(await cacheOf('/db/config')).toBe('private, max-age=3600')
     expect(await cacheOf('/pt/config')).toBe('public, max-age=3600, stale-while-revalidate=86400')
     expect(await cacheOf('/onlinevideos')).toBe(
       'public, max-age=3600, stale-while-revalidate=86400',

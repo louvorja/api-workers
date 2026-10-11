@@ -158,7 +158,9 @@ export const openapi = {
           '`{pt,es}_{categories,musics,hymnal,bible_book,bible_version}`, ' +
           '`pt_hymnal_1996`, `album_{id}`, `music_{id}` e ' +
           '`bible_{versão}_{livro}_{capítulo}`. Para baixar a Bíblia inteira, use ' +
-          '`/db/bible-bundle` em vez de pedir capítulo por capítulo.',
+          '`/db/bible-bundle` em vez de pedir capítulo por capítulo. Os campos `url_*` ' +
+          'trazem o endereço completo do arquivo de mídia, direto no armazenamento: ' +
+          'baixe dele, e não de `/file`.',
         parameters: [
           {
             name: 'key',
@@ -183,7 +185,9 @@ export const openapi = {
       get: {
         tags: ['Banco estático'],
         summary: 'ZIP com todas as tabelas',
-        description: 'Uma requisição em vez de 18.060. É como a ingestão se abastece.',
+        description:
+          'Uma requisição em vez de 18.060. Os campos `url_*` já vêm com o endereço ' +
+          'completo de cada arquivo de mídia, direto no armazenamento.',
         responses: { 200: { description: 'application/zip.' }, 404: NOT_FOUND },
       },
     },

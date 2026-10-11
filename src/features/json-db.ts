@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { COMMON_HEADERS, notFound } from '../lib/http.ts'
+import { mediaVariantFor, withMediaUrls } from '../lib/media-urls.ts'
 import { serveObject } from '../lib/r2.ts'
 import type { App } from '../types.ts'
 
@@ -13,37 +14,12 @@ const JSON_CACHE = 'public, max-age=86400, stale-while-revalidate=604800'
 
 /**
  * O cache do Worker não separa as respostas por domínio: a chave é só caminho e
- * query, e os dois apps pedem a mesma URL (`?AAAAMMDD`). O catálogo sai
- * diferente em cada domínio, então `public` aqui entrega a um app a resposta
- * montada para o outro. Fica só no cache de quem pediu.
+ * query, e os dois apps pedem a mesma URL (`?AAAAMMDD`). O catálogo sai com
+ * endereços de mídia diferentes em cada domínio (ver lib/media-urls.ts), então
+ * `public` aqui entrega a um app a resposta montada para o outro. Fica só no
+ * cache de quem pediu.
  */
 const CATALOG_CACHE = 'private, max-age=86400'
-
-/**
- * Domínio da API antiga. Quem chega por ele é cliente antigo — o app web em
- * app.louvorja.com.br usa os campos `url_*` do catálogo como endereço pronto,
- * sem acrescentar nada na frente, que era como a API PHP os devolvia.
- */
-const LEGACY_HOSTS = new Set(['api.louvorja.com.br'])
-
-/**
- * Reescreve os caminhos de mídia do catálogo como endereços completos.
- *
- * O áudio volta a ter o nome `.mp3`, porque navegadores de iPhones mais velhos
- * não tocam Opus. Com `audioBase` ele aponta para o armazenamento dos MP3
- * originais; sem, sai pelo próprio domínio, onde quem responde `/file/musics`
- * é o servidor antigo. As imagens ficam como estão (JPEG) e saem daqui.
- */
-export function legacyCatalog(text: string, origin: string, audioBase?: string): string {
-  const audio = audioBase ? audioBase.replace(/\/+$/, '') : `${origin}/file`
-  return text.replace(
-    /"(url_[a-z_]+)":"\/(covers|images|musics)\/((?:[^"\\]|\\.)*)"/g,
-    (_match, key: string, dir: string, rest: string) =>
-      dir === 'musics'
-        ? `"${key}":"${audio}/musics/${rest.replace(/\.opus$/, '.mp3')}"`
-        : `"${key}":"${origin}/file/${dir}/${rest}"`,
-  )
-}
 
 /**
  * Quem pede capítulo que não existe quase sempre é um script varrendo versões e
@@ -74,17 +50,11 @@ jsonDb.on(['GET', 'HEAD'], '/json_db/:key', async (c) => {
     return c.json({ error: 'Arquivo não encontrado!', details: BIBLE_BUNDLE_HINT }, 404)
   }
 
-  const url = new URL(c.req.url)
-  if (LEGACY_HOSTS.has(url.hostname)) {
-    const object = await c.env.FILES.get(`json_db/${key}.json`)
-    if (object === null) return notFound(c)
-    const headers = new Headers(COMMON_HEADERS)
-    headers.set('Content-Type', 'application/json')
-    headers.set('Cache-Control', CATALOG_CACHE)
-    const body = legacyCatalog(await object.text(), url.origin, c.env.LEGACY_AUDIO_URL)
-    return new Response(c.req.method === 'HEAD' ? null : body, { headers })
-  }
-
-  const res = await serveObject(c.env.FILES, `json_db/${key}.json`, c.req.raw, CATALOG_CACHE)
-  return res ?? notFound(c)
+  const object = await c.env.FILES.get(`json_db/${key}.json`)
+  if (object === null) return notFound(c)
+  const headers = new Headers(COMMON_HEADERS)
+  headers.set('Content-Type', 'application/json')
+  headers.set('Cache-Control', CATALOG_CACHE)
+  const body = withMediaUrls(await object.text(), mediaVariantFor(new URL(c.req.url).hostname))
+  return new Response(c.req.method === 'HEAD' ? null : body, { headers })
 })

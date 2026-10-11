@@ -1,5 +1,11 @@
 import { Hono } from 'hono'
 import { COMMON_HEADERS, notFound } from '../lib/http.ts'
+import {
+  BUNDLE_KEY,
+  BUNDLE_VARIANT_KEYS,
+  mediaVariantFor,
+  withMediaUrls,
+} from '../lib/media-urls.ts'
 import { serveObject } from '../lib/r2.ts'
 import type { App } from '../types.ts'
 
@@ -15,6 +21,9 @@ const DEFAULT_PER_PAGE = 50
 const SNAPSHOT_CACHE = 'public, max-age=3600, stale-while-revalidate=86400'
 // A Bíblia é estática: o pacote só muda se alguém republicar os capítulos.
 const BIBLE_CACHE = 'public, max-age=86400, stale-while-revalidate=604800'
+// O que carrega endereço de mídia sai diferente em cada domínio, e o cache do
+// Worker tem uma chave só para todos eles: só quem pediu pode guardar.
+const CATALOG_CACHE = 'private, max-age=3600'
 
 export const db = new Hono<App>()
 
@@ -31,9 +40,16 @@ db.on(['GET', 'HEAD'], '/db/bible-bundle', async (c) => {
 })
 
 // Precisa vir antes de /db/:key, senão o curinga tenta ler json_db/bundle.json.
+// Cada domínio recebe o pacote com os endereços de mídia dele já escritos. O
+// pacote sem endereços é a reserva enquanto a variante não foi publicada: os
+// apps completam o caminho com o endereço da API.
 db.on(['GET', 'HEAD'], '/db/bundle', async (c) => {
-  const res = await serveObject(c.env.FILES, 'meta/bundle.zip', c.req.raw, SNAPSHOT_CACHE)
-  return res ?? notFound(c)
+  const variant = BUNDLE_VARIANT_KEYS[mediaVariantFor(new URL(c.req.url).hostname)]
+  for (const key of [variant, BUNDLE_KEY]) {
+    const res = await serveObject(c.env.FILES, key, c.req.raw, CATALOG_CACHE)
+    if (res) return res
+  }
+  return notFound(c)
 })
 
 // Precisa vir antes de /db/:key: extrai os valores diretamente do mesmo JSON
@@ -93,7 +109,12 @@ db.on(['GET', 'HEAD'], '/db/:key', async (c) => {
   const object = await c.env.FILES.get(`json_db/${key}.json`)
   if (object === null) return notFound(c)
 
-  const data = await object.json<unknown>()
+  // Capítulo bíblico não tem mídia e sai igual em todo domínio.
+  const isBible = key.startsWith('bible_')
+  const text = await object.text()
+  const data = JSON.parse(
+    isBible ? text : withMediaUrls(text, mediaVariantFor(new URL(c.req.url).hostname)),
+  ) as unknown
   const perPage = Math.max(1, Number(c.req.query('per_page')) || DEFAULT_PER_PAGE)
   const page = Math.max(1, Number(c.req.query('page')) || 1)
 
@@ -105,7 +126,7 @@ db.on(['GET', 'HEAD'], '/db/:key', async (c) => {
 
   const headers = new Headers(COMMON_HEADERS)
   headers.set('Content-Type', 'application/json')
-  headers.set('Cache-Control', SNAPSHOT_CACHE)
+  headers.set('Cache-Control', isBible ? SNAPSHOT_CACHE : CATALOG_CACHE)
 
   return new Response(
     JSON.stringify({

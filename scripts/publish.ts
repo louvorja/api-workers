@@ -27,6 +27,8 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { BUNDLE_KEY } from '../src/lib/media-urls.ts'
+import { type BundleVariant, buildBundleVariants } from './lib/bundle-variants.ts'
 import { generateBible, generateCatalog, inspectBiblePublication } from './lib/catalog.ts'
 import { assertCutoverAdmin } from './lib/cutover.ts'
 import { localD1 } from './lib/d1-local.ts'
@@ -112,7 +114,7 @@ const firstRun = Object.keys(state).length === 0
 const workdir = mkdtempSync(join(tmpdir(), 'louvorja-publish-'))
 const bundleDir = join(workdir, 'json')
 mkdirSync(bundleDir)
-const bundle = await r2.get('meta/bundle.zip')
+const bundle = await r2.get(BUNDLE_KEY)
 if (bundle !== null) {
   writeFileSync(join(workdir, 'bundle.zip'), bundle)
   execFileSync('unzip', ['-qq', '-o', join(workdir, 'bundle.zip'), '-d', bundleDir])
@@ -295,6 +297,7 @@ const upload = (key: string, body: string | Uint8Array, type = 'application/json
 // Atualiza primeiro o diretório de trabalho: o ZIP sai do mesmo retrato que
 // será enviado ao R2.
 let zipPath: string | null = null
+let bundleVariants: BundleVariant[] = []
 if (jsonDb.puts.length > 0 || jsonDb.deletes.length > 0) {
   for (const put of jsonDb.puts) writeFileSync(join(workdir, 'json', put.key.slice(8)), put.body)
   for (const key of jsonDb.deletes) {
@@ -303,6 +306,9 @@ if (jsonDb.puts.length > 0 || jsonDb.deletes.length > 0) {
   }
   zipPath = join(workdir, 'bundle-new.zip')
   execFileSync('zip', ['-qq', '-r', '-X', zipPath, '.'], { cwd: bundleDir })
+  // Os pacotes com endereço de mídia saem do mesmo retrato. Se ficassem para
+  // trás, a API entregaria o catálogo anterior a quem instala pelo pacote.
+  bundleVariants = buildBundleVariants(bundleDir, workdir)
 }
 
 let bibleZipPath: string | null = null
@@ -321,7 +327,10 @@ await pool([...jsonDb.puts, ...restPlan.puts], 8, (put) => upload(put.key, put.b
 await pool([...jsonDb.deletes, ...restPlan.deletes], 8, (key) => r2.del(key))
 
 if (zipPath) {
-  await upload('meta/bundle.zip', readFileSync(zipPath), 'application/zip')
+  await upload(BUNDLE_KEY, readFileSync(zipPath), 'application/zip')
+}
+for (const variant of bundleVariants) {
+  await upload(variant.key, readFileSync(variant.path), 'application/zip')
 }
 if (bibleZipPath) {
   await upload(BIBLE_BUNDLE_KEY, readFileSync(bibleZipPath), 'application/zip')

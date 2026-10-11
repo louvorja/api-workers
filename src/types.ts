@@ -13,8 +13,6 @@ export type Bindings = {
   GITHUB_TASK_REPO?: string
   /** Servidor de FTP entregue ao Delphi, por idioma (JSON). Sem ele, o FTP fica desligado. */
   FTP_COMPAT_CONFIG?: string
-  /** Endereço público dos MP3 originais, usado no catálogo do domínio antigo. */
-  LEGACY_AUDIO_URL?: string
   TELEGRAM_BOT_TOKEN?: string
   TELEGRAM_CHAT_ID?: string
 }
