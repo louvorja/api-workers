@@ -43,7 +43,12 @@ jobs:
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      # Originais (MP3, BMP) e bancos do Delphi: é o que o Delphi e os apps
+      # antigos baixam, em mp3.louvorja.com.br.
+      R2_ORIGINALS_BUCKET: files-original
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      # Leitura dos lançamentos do Delphi, sem o limite de pedidos anônimos.
+      GITHUB_TOKEN: ${{ github.token }}
 
     steps:
       - uses: actions/checkout@v5
@@ -103,6 +108,44 @@ jobs:
         if: steps.gate.outputs.changed == 'true'
         run: npx --no-install wrangler d1 export louvorja --remote --output=replica.sql
 
+      - name: Atualizar vídeos online
+        if: steps.gate.outputs.changed == 'true' && steps.task.outputs.task == 'refresh_online_videos'
+        run: >-
+          npm run online-videos:refresh --
+          --export=replica.sql
+          --write
+
+      - name: Importar apresentações
+        if: steps.gate.outputs.changed == 'true' && steps.task.outputs.task == 'import_slides'
+        run: >-
+          npm run slides:import --
+          --export=replica.sql
+          --source=r2
+          --write
+
+      # Os passos seguintes leem o banco: se a importação ou os vídeos gravaram
+      # nele, o export é refeito.
+      - name: Exportar o banco depois da importação
+        if: steps.gate.outputs.changed == 'true'
+        run: |
+          if grep -qsiE '^[[:space:]]*(INSERT|UPDATE|DELETE)' refresh-online-videos.sql import-slides.sql; then
+            npx --no-install wrangler d1 export louvorja --remote --output=replica.sql
+          fi
+
+      # Arquivo novo chega só de um lado: o original enviado ao bucket dos
+      # originais, ou o áudio de uma apresentação importada. Este passo guarda o
+      # original e gera a versão dos apps atuais (Opus acima de 128 kbps, JPEG no
+      # lugar de BMP), como o cron antigo fazia ao trazer a mídia da API PHP.
+      - name: Mídia nova
+        id: media
+        if: steps.gate.outputs.changed == 'true'
+        run: |
+          npm run media:normalize -- --export=replica.sql --limit=150 --write
+          if [ -s media-normalize.sql ]; then
+            npx --no-install wrangler d1 export louvorja --remote --output=replica.sql
+            printf 'wrote=true\n' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Reconciliar tamanhos
         if: steps.gate.outputs.changed == 'true' && steps.task.outputs.task == 'refresh_files_size'
         run: >-
@@ -119,50 +162,40 @@ jobs:
           --task=duration
           --write
 
-      - name: Reconciliação horária completa
-        if: steps.gate.outputs.changed == 'true' && steps.task.outputs.task == 'refresh_files_all'
+      # Também quando a mídia nova gravou: o arquivo convertido tem outro tamanho.
+      - name: Reconciliação completa
+        if: >-
+          steps.gate.outputs.changed == 'true' &&
+          (steps.task.outputs.task == 'refresh_files_all' || steps.media.outputs.wrote == 'true')
         run: >-
           npm run files:reconcile --
           --export=replica.sql
           --task=all
           --write
 
-      - name: Atualizar vídeos online
-        if: steps.gate.outputs.changed == 'true' && steps.task.outputs.task == 'refresh_online_videos'
-        run: >-
-          npm run online-videos:refresh --
-          --export=replica.sql
-          --write
-
-      - name: Importar apresentações
-        if: steps.gate.outputs.changed == 'true' && steps.task.outputs.task == 'import_slides'
-        run: >-
-          npm run slides:import --
-          --export=replica.sql
-          --source=r2
-          --write
-
-      # A publicação precisa ler o que os jobs acima confirmaram no D1. O banco
-      # só é exportado de novo quando algum deles realmente gravou.
-      - name: Algum job gravou no banco?
-        id: wrote
+      # A publicação precisa ler o que a reconciliação confirmou no D1. O banco
+      # só é exportado de novo quando ela realmente gravou.
+      - name: Exportar o banco depois da reconciliação
         if: steps.gate.outputs.changed == 'true'
         run: |
-          wrote=false
-          for file in reconcile-files.sql refresh-online-videos.sql import-slides.sql; do
-            if [ -s "$file" ] && grep -qiE '^[[:space:]]*(INSERT|UPDATE|DELETE)' "$file"; then
-              wrote=true
-            fi
-          done
-          printf 'wrote=%s\n' "$wrote" >> "$GITHUB_OUTPUT"
-
-      - name: Exportar o banco de novo
-        if: steps.wrote.outputs.wrote == 'true'
-        run: npx --no-install wrangler d1 export louvorja --remote --output=replica.sql
+          if grep -qsiE '^[[:space:]]*(INSERT|UPDATE|DELETE)' reconcile-files.sql; then
+            npx --no-install wrangler d1 export louvorja --remote --output=replica.sql
+          fi
 
       - name: Publicar
         if: steps.gate.outputs.changed == 'true'
         run: npm run publish -- --export=replica.sql --write
+
+      # O banco SQLite do Delphi sai do mesmo export, depois da publicação: só
+      # então a versão nova do catálogo existe. Sem versão nova, não faz nada.
+      - name: Banco do Delphi
+        if: steps.gate.outputs.changed == 'true'
+        run: npm run delphi:db -- --export=replica.sql --write
+
+      # Não depende do banco: publicar um lançamento final do Delphi no GitHub
+      # é o que faz o programa avisar que há versão nova.
+      - name: Versão do Delphi
+        run: npm run delphi:version -- --write
 
       - name: Relatórios
         if: always()
@@ -176,3 +209,6 @@ jobs:
             refresh-online-videos.sql
             import-slides.sql
             import-slides-report.json
+            media-normalize.sql
+            media-normalize-report.json
+            delphi-db-report.json

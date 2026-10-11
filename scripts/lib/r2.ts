@@ -10,11 +10,19 @@ const aws = new AwsClient({
   region: 'auto',
 })
 
-const url = (key: string) =>
-  `${endpoint}/${bucket}/${key.split('/').map(encodeURIComponent).join('/')}`
+/** Bucket com os arquivos originais (MP3, BMP) e os bancos do Delphi. */
+export const ORIGINALS_BUCKET = process.env.R2_ORIGINALS_BUCKET ?? 'files-original'
 
-export async function put(key: string, body: Uint8Array | string, contentType: string) {
-  const res = await aws.fetch(url(key), {
+const url = (key: string, bucketName = bucket) =>
+  `${endpoint}/${bucketName}/${key.split('/').map(encodeURIComponent).join('/')}`
+
+export async function put(
+  key: string,
+  body: Uint8Array | string,
+  contentType: string,
+  bucketName = bucket,
+) {
+  const res = await aws.fetch(url(key, bucketName), {
     method: 'PUT',
     body,
     headers: { 'content-type': contentType },
@@ -22,15 +30,15 @@ export async function put(key: string, body: Uint8Array | string, contentType: s
   if (!res.ok) throw new Error(`PUT ${key} -> ${res.status} ${await res.text()}`)
 }
 
-export async function get(key: string): Promise<Uint8Array | null> {
-  const res = await aws.fetch(url(key))
+export async function get(key: string, bucketName = bucket): Promise<Uint8Array | null> {
+  const res = await aws.fetch(url(key, bucketName))
   if (res.status === 404) return null
   if (!res.ok) throw new Error(`GET ${key} -> ${res.status}`)
   return new Uint8Array(await res.arrayBuffer())
 }
 
-export async function exists(key: string): Promise<boolean> {
-  const res = await aws.fetch(url(key), { method: 'HEAD' })
+export async function exists(key: string, bucketName = bucket): Promise<boolean> {
+  const res = await aws.fetch(url(key, bucketName), { method: 'HEAD' })
   if (res.status === 404) return false
   if (!res.ok) throw new Error(`HEAD ${key} -> ${res.status}`)
   return true

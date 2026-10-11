@@ -345,12 +345,11 @@ if (publishBibleBundle) {
   )
 }
 
-if (config) {
-  // `db_version` é o que o app compara para saber se há catálogo novo. Só sobe
-  // depois de todo o conteúdo estar no bucket.
-  const params = JSON.parse((await text('meta/params.json')) ?? '{}') as Record<string, unknown>
-  await upload('meta/params.json', JSON.stringify({ ...params, db_version: targetVersion }))
-}
+// `db_version` em /params não sobe aqui. Quem lê esse número é o Delphi, que
+// então baixa o banco SQLite dele: anunciar a versão antes de o banco novo
+// existir o faria tentar atualizar a cada abertura. Quem publica o banco e a
+// versão dele é scripts/delphi-db.ts. Os apps novos comparam `version_number`
+// do `config`, que acabou de ser publicado.
 
 if (config) {
   // Por último: só depois de tudo no bucket a nova versão vira verdade no banco.

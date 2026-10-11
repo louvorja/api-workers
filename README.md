@@ -57,14 +57,61 @@ O app acrescenta a data à URL de `/json_db` e um carimbo único quando o
 operador pede para atualizar, então o cache não segura conteúdo velho além do
 dia.
 
-### FTP do Delphi e Bíblia fora do banco
+### O programa Delphi
 
-- Workers não recebe conexões FTP. O que este Worker faz é o aperto de mão
-  HTTPS do programa Delphi: `/params` anuncia `conn_ftp` e `/ftp` devolve host,
-  porta e credenciais de um servidor de FTP que existe à parte (hoje, o do
-  servidor antigo), lidos do secret `FTP_COMPAT_CONFIG`. O acervo em MP3 e o
-  banco SQLite do Delphi continuam vindo desse FTP; nada disso é gerado aqui.
-  Sem o secret, `/params` não anuncia `conn_ftp` e `/ftp` responde `410`.
+O Delphi lê tudo de `https://api.louvorja.com.br/params?type=env` e precisa de
+endereços nesse domínio: no `workers.dev` a Cloudflare recusa a identificação
+dele ("Indy Library", erro 1010), e isso não é configurável. Por isso `/params`
+sempre entrega com o domínio antigo os endereços desta API (`conn_ftp`,
+`coletaneas_online`, `version_log`).
+
+**Atualização por FTP (versões atuais do programa).** Workers não recebe
+conexões FTP. O Worker só faz o aperto de mão HTTPS: `/params` anuncia
+`conn_ftp` e `/ftp` devolve host, porta e credenciais de um servidor de FTP
+que existe à parte (o do servidor antigo), lidos do secret
+`FTP_COMPAT_CONFIG`. O que está naquele FTP não é gerado aqui: o banco de lá
+parou na versão em que o PHP o deixou, e `db_version` em `/params` fica nesse
+número para essas instalações não tentarem atualizar a cada abertura. Sem o
+secret, `/params` não anuncia `conn_ftp` e `/ftp` responde `410`.
+
+**Atualização por HTTPS (a versão seguinte do programa).** Tudo que o FTP
+entregava está em `mp3.louvorja.com.br` (bucket `files-original`), e `/params`
+diz onde:
+
+| Chave de `/params` | O que é |
+| --- | --- |
+| `https_db_version` | Versão do banco disponível por HTTPS. Compare com a do banco local |
+| `https_db_pt`, `https_db_es` | O banco SQLite de cada idioma (`config/<idioma>_database.db`) |
+| `https_files` | Base dos arquivos. Some `dir` + `/` + `name` da tabela `files` do banco |
+
+O banco é o mesmo que o PHP gerava: mesmas tabelas e visões, nomes de arquivo
+antigos (`.mp3`, `.bmp`) e o tamanho do arquivo original, que é o que o Delphi
+confere. `npm run delphi:db` o gera a partir do D1 quando a versão do catálogo
+passa de `https_db_version`, e só anuncia a versão depois de os dois bancos
+estarem no ar. A cópia dos últimos bancos gerados pelo PHP está em
+`backup/delphi-db-php-185/`.
+
+**Versão nova do programa.** As chaves de versão e de instalador saem do
+último lançamento final de `louvorja/desktop` no GitHub (`npm run
+delphi:version`): publicar o lançamento lá é o aviso. Pré-lançamento não é
+anunciado, e a versão nunca volta para trás.
+
+### Mídia nova
+
+Cada arquivo existe em dois lugares: o original (MP3, BMP, JPEG) no bucket
+`files-original`, com o nome antigo, e a versão dos apps atuais no bucket
+`files`. Um arquivo novo chega só de um lado — o original enviado para
+`files-original` no caminho que o catálogo registra
+(`musics/<idioma>/<álbum>/<arquivo>.mp3`, `covers/…`, `images/…`), ou o
+áudio de uma apresentação importada, gravado em `files` — e
+`npm run media:normalize` completa o outro: guarda o original e gera a versão
+convertida. A regra é a do cron antigo: MP3 acima de 128 kbps vira Opus
+(112 kbps até 160 de origem, 128 kbps acima disso); até 128 kbps o MP3 fica
+como está, porque converter não economizaria espaço e somaria uma geração de
+perda; BMP vira JPEG.
+
+### Bíblia fora do banco
+
 - A Bíblia não é editada pelo painel: os 404 mil versículos ficam como estão no
   R2 e a publicação não toca neles. `seed-d1.ts --bible` existe, mas carregá-los
   ocuparia cerca de 11 dias da cota de escrita e não é parte do plano.
@@ -86,14 +133,16 @@ e na resposta de capítulo inexistente.
 
 ## O domínio da API antiga
 
-`api.louvorja.com.br` continua apontando para o servidor PHP, mas a maior parte
-das rotas é desviada para este Worker (lista em `routes`, no `wrangler.jsonc`),
-para tirar a carga dele. Ficam no servidor antigo:
+`api.louvorja.com.br` é atendido inteiro por este Worker (rota única em
+`routes`, no `wrangler.jsonc`). O registro de DNS do endereço ainda aponta
+para o servidor PHP, porque as rotas precisam dele, mas nenhum pedido chega lá
+por HTTP: `/auth`, `/admin`, `/tasks` e `/health` desse domínio também são
+os daqui. Quem ainda fala com aquela máquina é só o Delphi, por FTP, direto no
+IP.
 
-- `/auth`, `/admin` e `/tasks`: o painel antigo, que grava no MySQL;
-- `/file/musics`: continua respondendo lá, mas o catálogo não aponta mais para
-  ele (ver "Endereços de mídia do catálogo");
-- `/health`.
+Quem pede `/file/musics/<faixa>.mp3` de uma faixa que virou Opus é
+redirecionado para o MP3 original em `mp3.louvorja.com.br`: quem ainda pede
+por esse nome é quem só toca MP3.
 
 ### Endereços de mídia do catálogo
 
@@ -252,12 +301,19 @@ Aplique-a só depois de terminar a carga inicial das letras.
 | `npm run publish` | Gera e publica os snapshots |
 | `npm run publish:gate` | Diz se o painel alterou algo desde a última publicação |
 | `npm run catalog:diff` | Audita o que o banco gera contra o que está publicado |
+| `npm run media:normalize` | Guarda o original e gera a versão convertida da mídia nova |
 | `npm run files:reconcile` | Confere tamanho no R2 e duração com `ffprobe` |
+| `npm run delphi:db` | Gera e publica os bancos SQLite do Delphi |
+| `npm run delphi:version` | Anuncia a versão do Delphi lançada no GitHub |
+| `npm run bundle:variants` | Regera os pacotes com endereço de mídia |
 | `npm run online-videos:refresh` | Atualiza canais, playlists e vídeos do YouTube |
 | `npm run slides:import` | Importa `.slja/.lja` com áudio e imagens |
 
-O workflow `maintenance.yml` executa esses jobs fora do limite curto do Worker;
-as rotas `/tasks/*` só fazem um `workflow_dispatch` autenticado. O agendamento
+O workflow `maintenance.yml` é o único cron: executa esses jobs fora do limite
+curto do Worker, nesta ordem — mídia nova, reconciliação, publicação, banco do
+Delphi e versão do Delphi. As rotas `/tasks/*` só fazem um `workflow_dispatch`
+autenticado. A ingestão que copiava tudo da API PHP (`ingest.yml`) foi
+desligada e não deve voltar: as duas gravariam os mesmos objetos. O agendamento
 (de hora em hora) fica desligado até a variável `MAINTENANCE_SCHEDULE` do
 repositório valer `on` — ligue depois de conferir a primeira publicação manual.
 
@@ -311,8 +367,10 @@ servidor antigo; só o use se ele passar a apontar para este Worker.
 
 - `/file/*` aceita somente `covers/`, `images/` e `musics/`, bloqueia subida de
   diretório e responde `206` para `Range`.
-- Os nomes `.mp3` e `.bmp` continuam resolvendo para os objetos Opus/JPEG; o
-  `Content-Type` descreve os bytes reais.
+- Em `/file`, o nome `.bmp` continua resolvendo para a capa JPEG e o `.opus`
+  para o MP3 quando a faixa não foi convertida; o `.mp3` de uma faixa
+  convertida redireciona para o original. O `Content-Type` descreve os bytes
+  reais.
 - Respostas privadas nunca vão para o cache, e um `404` público não fica preso
   na borda.
 - Entradas de rede e arquivos importados são validados antes do uso.
