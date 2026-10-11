@@ -22,6 +22,13 @@ const JSON_CACHE = 'public, max-age=86400, stale-while-revalidate=604800'
 const CATALOG_CACHE = 'private, max-age=86400'
 
 /**
+ * `config` é a pergunta "há banco novo?". O menu de atualizações do violin-app
+ * pede essa chave sem a data na URL: com um dia de cache ele repetia por 24 horas
+ * a versão que viu primeiro, mesmo depois de ela mudar no servidor.
+ */
+const VERSION_CACHE = 'private, no-cache'
+
+/**
  * Quem pede capítulo que não existe quase sempre é um script varrendo versões e
  * livros. A resposta mostra a ele o caminho certo; os apps só olham o status.
  */
@@ -59,7 +66,7 @@ jsonDb.on(['GET', 'HEAD'], '/json_db/:key', async (c) => {
   if (object === null) return notFound(c)
   const headers = new Headers(COMMON_HEADERS)
   headers.set('Content-Type', 'application/json')
-  headers.set('Cache-Control', CATALOG_CACHE)
+  headers.set('Cache-Control', key === 'config' ? VERSION_CACHE : CATALOG_CACHE)
   const body = withMediaUrls(await object.text(), mediaVariantFor(new URL(c.req.url).hostname))
   return new Response(c.req.method === 'HEAD' ? null : body, { headers })
 })

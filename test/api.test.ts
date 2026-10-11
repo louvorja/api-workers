@@ -33,10 +33,10 @@ beforeAll(async () => {
 
 describe('json_db', () => {
   it('serve um arquivo existente', async () => {
-    const res = await call('/json_db/config')
+    const res = await call('/json_db/music_1')
     expect(res.status).toBe(200)
     expect(res.headers.get('cache-control')).toBe('private, max-age=86400')
-    expect(await res.json()).toEqual({ version_number: 185 })
+    expect(await res.json()).toEqual({ id_music: 1 })
   })
 
   it('404 no formato legado, sem vazar caminho interno', async () => {
@@ -311,7 +311,11 @@ describe('REST', () => {
   it('deixa o catálogo em cache no cliente e na borda', async () => {
     const cacheOf = async (path: string) => (await call(path)).headers.get('cache-control')
     // O catálogo de /json_db muda conforme o domínio: só o cliente guarda.
-    expect(await cacheOf('/json_db/config')).toBe('private, max-age=86400')
+    expect(await cacheOf('/json_db/music_1')).toBe('private, max-age=86400')
+    // A versão do banco é a exceção: quem pergunta "há banco novo?" não pode
+    // receber a resposta de ontem, com ou sem a data na URL.
+    expect(await cacheOf('/json_db/config')).toBe('private, no-cache')
+    expect(await cacheOf('/json_db/config?20261011')).toBe('private, no-cache')
     expect(await cacheOf('/db/bible-bundle')).toBe(
       'public, max-age=86400, stale-while-revalidate=604800',
     )
