@@ -3,6 +3,7 @@ import { admin } from './features/admin.ts'
 import { auth } from './features/auth.ts'
 import { db } from './features/db.ts'
 import { files } from './features/files.ts'
+import { ftp } from './features/ftp.ts'
 import { jsonDb } from './features/json-db.ts'
 import { legacy } from './features/legacy.ts'
 import { onlineVideos } from './features/online-videos.ts'
@@ -54,6 +55,7 @@ app.route('/', jsonDb)
 app.route('/', db)
 app.route('/', files)
 app.route('/', params)
+app.route('/', ftp)
 app.route('/', onlineVideos)
 app.route('/', legacy)
 // Antes do rest: /auth/me, /admin/musics e /tasks/* casariam com /:lang/:collection.

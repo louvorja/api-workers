@@ -96,18 +96,3 @@ legacy.get('/documentation', () => {
 })
 
 legacy.on(['GET', 'HEAD'], '/version_log', versionLog)
-
-/**
- * O download por FTP foi descontinuado: a mídia sai por HTTPS em /file. O
- * endpoint responde explicitamente em vez de sumir, para que um cliente antigo
- * receba um erro legível.
- */
-for (const path of ['/ftp', '/:lang/ftp']) {
-  legacy.get(path, (c) => {
-    c.header('Cache-Control', 'no-store')
-    return c.json(
-      { error: 'FTP descontinuado', details: 'Baixe as mídias por HTTPS em /file/<caminho>' },
-      410,
-    )
-  })
-}

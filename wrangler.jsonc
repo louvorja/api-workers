@@ -5,6 +5,36 @@
   "account_id": "ebfd182d9bc3913163758a88118752f5",
   "compatibility_date": "2026-08-22",
 
+  // O endereço workers.dev é o que os apps usam e precisa continuar ligado:
+  // quando há rotas declaradas, o padrão do wrangler passa a ser desligá-lo.
+  "workers_dev": true,
+
+  // Rotas de api.louvorja.com.br atendidas por este Worker, para tirar a carga
+  // do servidor PHP, que continua por trás do mesmo endereço. O que não está
+  // listado segue indo para ele:
+  // - /auth, /admin e /tasks: o painel antigo, que grava no MySQL;
+  // - /file/musics: o áudio em MP3 original, que o app web antigo toca em
+  //   navegadores sem suporte a Opus (o /json_db daqui aponta para lá);
+  // - /health: para continuar medindo o servidor antigo.
+  // O FTP do programa Delphi não passa por HTTP: /ftp só entrega o endereço dele.
+  // A zona vai pelo identificador: existe outra com o mesmo nome (a antiga, já
+  // movida, em outra conta), e pelo nome as rotas caíam nela e não valiam.
+  "routes": [
+    { "pattern": "api.louvorja.com.br/params*", "zone_id": "cbec6f75b761dabdc81ac07031af0dee" },
+    { "pattern": "api.louvorja.com.br/ftp*", "zone_id": "cbec6f75b761dabdc81ac07031af0dee" },
+    { "pattern": "api.louvorja.com.br/download*", "zone_id": "cbec6f75b761dabdc81ac07031af0dee" },
+    { "pattern": "api.louvorja.com.br/onlinevideos*", "zone_id": "cbec6f75b761dabdc81ac07031af0dee" },
+    { "pattern": "api.louvorja.com.br/version*", "zone_id": "cbec6f75b761dabdc81ac07031af0dee" },
+    { "pattern": "api.louvorja.com.br/player*", "zone_id": "cbec6f75b761dabdc81ac07031af0dee" },
+    { "pattern": "api.louvorja.com.br/metadata*", "zone_id": "cbec6f75b761dabdc81ac07031af0dee" },
+    { "pattern": "api.louvorja.com.br/json_db*", "zone_id": "cbec6f75b761dabdc81ac07031af0dee" },
+    { "pattern": "api.louvorja.com.br/db/*", "zone_id": "cbec6f75b761dabdc81ac07031af0dee" },
+    { "pattern": "api.louvorja.com.br/file/covers/*", "zone_id": "cbec6f75b761dabdc81ac07031af0dee" },
+    { "pattern": "api.louvorja.com.br/file/images/*", "zone_id": "cbec6f75b761dabdc81ac07031af0dee" },
+    { "pattern": "api.louvorja.com.br/pt*", "zone_id": "cbec6f75b761dabdc81ac07031af0dee" },
+    { "pattern": "api.louvorja.com.br/es*", "zone_id": "cbec6f75b761dabdc81ac07031af0dee" }
+  ],
+
   // Workers Caching (não o caches.default): faz read-through, colapsa
   // requisições concorrentes para o mesmo objeto frio e fatia Range sozinho —
   // ele remove o header Range antes de invocar o Worker, guarda o 200 inteiro e

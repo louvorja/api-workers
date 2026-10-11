@@ -11,6 +11,8 @@ export type Bindings = {
   GITHUB_TASK_TOKEN?: string
   GITHUB_TASK_REF?: string
   GITHUB_TASK_REPO?: string
+  /** Servidor de FTP entregue ao Delphi, por idioma (JSON). Sem ele, o FTP fica desligado. */
+  FTP_COMPAT_CONFIG?: string
   TELEGRAM_BOT_TOKEN?: string
   TELEGRAM_CHAT_ID?: string
 }

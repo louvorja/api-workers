@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { COMMON_HEADERS, notFound } from '../lib/http.ts'
 import type { App } from '../types.ts'
+import { ftpEnabled, ftpHandshakeUrl } from './ftp.ts'
 
 /**
  * O instalador Delphi consome INI; o app Electron consome JSON. Mesmo conteúdo.
@@ -23,6 +24,11 @@ params.on(['GET', 'HEAD'], '/params', async (c) => {
   if (object === null) return notFound(c)
 
   const data = await object.json<Record<string, unknown>>()
+  // O Delphi só inicia a atualização se receber o endereço do aperto de mão do
+  // FTP. A chave só existe enquanto houver um servidor de FTP configurado.
+  if (ftpEnabled(c.env)) {
+    data.conn_ftp = await ftpHandshakeUrl(new URL(c.req.url).origin, c.env.JWT_SECRET)
+  }
   const headers = new Headers(COMMON_HEADERS)
   headers.set('Cache-Control', PARAMS_CACHE)
 

@@ -129,8 +129,8 @@ export const openapi = {
       '  não expõe o caminho do banco.',
       '- `Access-Control-Allow-Credentials` foi removido: junto de',
       '  `Allow-Origin: *` ele é rejeitado por qualquer navegador.',
-      '- O download por FTP foi descontinuado: `/ftp` responde `410` e a mídia',
-      '  sai por HTTPS em `/file`.',
+      '- `/ftp` faz o aperto de mão do programa Delphi: devolve o servidor de FTP',
+      '  de onde ele baixa o acervo. O Worker não fala FTP; só entrega o endereço.',
     ].join('\n'),
   },
   servers: [{ url: 'https://api.louvorja.workers.dev', description: 'Produção' }],
@@ -232,7 +232,7 @@ export const openapi = {
         tags: ['Sistema'],
         summary: 'Parâmetros da aplicação',
         description:
-          'JSON por padrão; `?type=env` devolve INI com CRLF. Não traz `conn_ftp`: o download por FTP foi descontinuado.',
+          'JSON por padrão; `?type=env` devolve INI com CRLF. `conn_ftp` aparece enquanto houver um servidor de FTP configurado.',
         parameters: [
           {
             name: 'type',
@@ -282,10 +282,24 @@ export const openapi = {
     '/ftp': {
       get: {
         tags: ['Sistema'],
-        summary: 'Download por FTP (descontinuado)',
+        summary: 'Aperto de mão do FTP (Delphi)',
         description:
-          'A API não entrega mais credenciais de FTP. A resposta é sempre `410`, com a indicação de baixar a mídia por HTTPS em `/file/<caminho>`.',
-        responses: { 410: { description: 'FTP descontinuado.' } },
+          'Valida o token de `conn_ftp` e devolve, em Base64, o INI com host, porta, raiz e credenciais do servidor de FTP. Sem servidor configurado responde `410`.',
+        parameters: [
+          { name: 'token', in: 'query', required: true, schema: { type: 'string' } },
+          { name: 'data', in: 'query', required: false, schema: { type: 'string' } },
+          {
+            name: 'lang',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['pt', 'es'] },
+          },
+        ],
+        responses: {
+          200: { description: 'INI da conexão, codificado em Base64.' },
+          401: { description: 'Token inválido ou vencido.' },
+          410: { description: 'FTP desligado.' },
+        },
       },
     },
     '/auth/login': {
