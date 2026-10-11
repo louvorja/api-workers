@@ -36,6 +36,8 @@ app.get('/', async (c) => {
     endpoints: [
       '/json_db/:key',
       '/db/manifest',
+      '/db/bundle',
+      '/db/bible-bundle',
       '/db/:key',
       '/file/*',
       '/params',
@@ -47,6 +49,14 @@ app.get('/', async (c) => {
       '/{lang}/{musics,albums,categories,hymnal,lyrics,files,languages}',
       '/openapi.json',
     ],
+    // Quem quer o acervo inteiro baixa um arquivo, em vez de um pedido por item.
+    bulk: {
+      '/db/bible-bundle':
+        'ZIP com todos os capítulos da Bíblia, um arquivo bible_{versão}_{livro}_{capítulo}.json ' +
+        'por capítulo. Para baixar a Bíblia inteira, use este arquivo em vez de pedir ' +
+        '/json_db/bible_... capítulo por capítulo.',
+      '/db/bundle': 'ZIP com todas as tabelas do catálogo (álbuns, músicas, hinário e Bíblia).',
+    },
     db_version: current.db_version ?? null,
   })
 })

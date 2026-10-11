@@ -34,9 +34,7 @@ describe('catálogo pedido pelo domínio da API antiga', () => {
     const response = await get('https://api.louvorja.com.br/json_db/music_7?20261011')
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toBe('application/json')
-    expect(response.headers.get('cache-control')).toBe(
-      'public, max-age=86400, stale-while-revalidate=604800',
-    )
+    expect(response.headers.get('cache-control')).toBe('private, max-age=86400')
     expect(await response.json()).toEqual({
       ...music,
       url_image: 'https://api.louvorja.com.br/file/images/hasd_018.jpg',
@@ -65,6 +63,30 @@ describe('catálogo pedido pelo domínio da API antiga', () => {
     const bible = await get('https://api.louvorja.com.br/json_db/bible_1_1_1')
     expect(await bible.json()).toEqual([{ verse: 1, text: 'No princípio' }])
     expect((await get('https://api.louvorja.com.br/json_db/nao_existe')).status).toBe(404)
+  })
+
+  // O cache do Worker tem uma chave só para os dois domínios (caminho e query).
+  // Resposta que muda conforme o domínio não pode entrar nele.
+  it('mantém fora do cache compartilhado o que sai diferente em cada domínio', async () => {
+    const path = '/json_db/music_7?20261011'
+    const legacy = await get(`https://api.louvorja.com.br${path}`)
+    const current = await get(`https://api.louvorja.workers.dev${path}`)
+    expect(await legacy.text()).not.toBe(await current.text())
+    for (const response of [legacy, current]) {
+      expect(response.headers.get('cache-control')).toBe('private, max-age=86400')
+    }
+  })
+
+  it('deixa no cache compartilhado só a Bíblia, que sai igual nos dois domínios', async () => {
+    const path = '/json_db/bible_1_1_1?20261011'
+    const legacy = await get(`https://api.louvorja.com.br${path}`)
+    const current = await get(`https://api.louvorja.workers.dev${path}`)
+    expect(await legacy.text()).toBe(await current.text())
+    for (const response of [legacy, current]) {
+      expect(response.headers.get('cache-control')).toBe(
+        'public, max-age=86400, stale-while-revalidate=604800',
+      )
+    }
   })
 
   it('preserva aspas escapadas dentro do nome do arquivo', () => {

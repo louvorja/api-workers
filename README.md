@@ -69,6 +69,21 @@ dia.
   R2 e a publicação não toca neles. `seed-d1.ts --bible` existe, mas carregá-los
   ocuparia cerca de 11 dias da cota de escrita e não é parte do plano.
 
+### Bíblia inteira em um arquivo
+
+Quem precisa da Bíblia completa (cópia offline, busca, rotina agendada) baixa
+`/db/bible-bundle`: um ZIP de cerca de 26 MB com os 15.457 capítulos de todas as
+versões. Cada entrada se chama `bible_{versão}_{livro}_{capítulo}.json` e tem o
+mesmo conteúdo de `/json_db/bible_{versão}_{livro}_{capítulo}`. As versões e os
+livros estão em `/json_db/{pt,es}_bible_version` e `/json_db/{pt,es}_bible_book`;
+os livros de 1 a 66 são os das versões em português e os de 67 a 132, os das
+versões em espanhol.
+
+O capítulo avulso em `/json_db` existe para a tela que mostra um capítulo por
+vez. Varrer todos por ele são milhares de requisições na cota diária, contra
+uma do pacote. Por isso o pacote aparece na página inicial, no `/openapi.json`
+e na resposta de capítulo inexistente.
+
 ## O domínio da API antiga
 
 `api.louvorja.com.br` continua apontando para o servidor PHP, mas a maior parte

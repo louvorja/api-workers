@@ -35,9 +35,7 @@ describe('json_db', () => {
   it('serve um arquivo existente', async () => {
     const res = await call('/json_db/config')
     expect(res.status).toBe(200)
-    expect(res.headers.get('cache-control')).toBe(
-      'public, max-age=86400, stale-while-revalidate=604800',
-    )
+    expect(res.headers.get('cache-control')).toBe('private, max-age=86400')
     expect(await res.json()).toEqual({ version_number: 185 })
   })
 
@@ -258,6 +256,31 @@ describe('REST', () => {
     expect(Object.keys(spec.paths)).toContain('/file/{path}')
   })
 
+  // Sem isso, quem quer a Bíblia inteira só enxerga o caminho capítulo a capítulo.
+  it('mostra o pacote da Bíblia na página inicial, na documentação e no capítulo inexistente', async () => {
+    const home = (await (await call('/')).json()) as {
+      endpoints: string[]
+      bulk: Record<string, string>
+    }
+    expect(home.endpoints).toContain('/db/bible-bundle')
+    expect(home.bulk['/db/bible-bundle']).toContain('Bíblia inteira')
+
+    const spec = (await (await call('/openapi.json')).json()) as { paths: Record<string, unknown> }
+    expect(Object.keys(spec.paths)).toContain('/db/bible-bundle')
+
+    const missing = await call('/json_db/bible_9_79_3')
+    expect(missing.status).toBe(404)
+    expect(missing.headers.get('cache-control')).toBe('no-store')
+    expect(await missing.json()).toEqual({
+      error: 'Arquivo não encontrado!',
+      details: 'Para baixar a Bíblia inteira use /db/bible-bundle: um ZIP com todos os capítulos.',
+    })
+    // Fora da Bíblia o 404 continua no formato de sempre.
+    expect(await (await call('/json_db/nao_existe')).json()).toEqual({
+      error: 'Arquivo não encontrado!',
+    })
+  })
+
   it('health não entra em cache', async () => {
     const res = await call('/health')
     expect(res.headers.get('cache-control')).toBe('no-store')
@@ -267,9 +290,8 @@ describe('REST', () => {
   // gratuito. Só o que depende de quem pede ou do instante fica sem cache.
   it('deixa o catálogo em cache no cliente e na borda', async () => {
     const cacheOf = async (path: string) => (await call(path)).headers.get('cache-control')
-    expect(await cacheOf('/json_db/config')).toBe(
-      'public, max-age=86400, stale-while-revalidate=604800',
-    )
+    // O catálogo de /json_db muda conforme o domínio: só o cliente guarda.
+    expect(await cacheOf('/json_db/config')).toBe('private, max-age=86400')
     expect(await cacheOf('/db/bible-bundle')).toBe(
       'public, max-age=86400, stale-while-revalidate=604800',
     )

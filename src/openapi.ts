@@ -157,7 +157,8 @@ export const openapi = {
           'Formato consumido pelos apps LouvorJA. Chaves: `config`, ' +
           '`{pt,es}_{categories,musics,hymnal,bible_book,bible_version}`, ' +
           '`pt_hymnal_1996`, `album_{id}`, `music_{id}` e ' +
-          '`bible_{versão}_{livro}_{capítulo}`.',
+          '`bible_{versão}_{livro}_{capítulo}`. Para baixar a Bíblia inteira, use ' +
+          '`/db/bible-bundle` em vez de pedir capítulo por capítulo.',
         parameters: [
           {
             name: 'key',
@@ -183,6 +184,19 @@ export const openapi = {
         tags: ['Banco estático'],
         summary: 'ZIP com todas as tabelas',
         description: 'Uma requisição em vez de 18.060. É como a ingestão se abastece.',
+        responses: { 200: { description: 'application/zip.' }, 404: NOT_FOUND },
+      },
+    },
+    '/db/bible-bundle': {
+      get: {
+        tags: ['Banco estático'],
+        summary: 'ZIP com a Bíblia inteira',
+        description:
+          'Todos os capítulos de todas as versões em uma requisição (cerca de 26 MB). ' +
+          'Cada entrada do ZIP é um `bible_{versão}_{livro}_{capítulo}.json` com o mesmo ' +
+          'conteúdo de `/json_db/bible_{versão}_{livro}_{capítulo}`. As versões e os livros ' +
+          'estão em `/json_db/{pt,es}_bible_version` e `/json_db/{pt,es}_bible_book`. ' +
+          'É o caminho para quem quer a Bíblia completa: rotina agendada, cópia offline ou busca.',
         responses: { 200: { description: 'application/zip.' }, 404: NOT_FOUND },
       },
     },
