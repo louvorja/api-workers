@@ -259,10 +259,10 @@ describe('listagem', () => {
       url_image: 'https://api.test/file/images/fundo.jpg',
       image_version: 1,
       id_file_music: 3,
-      url_music: 'https://api.test/file/musics/pt/Álbum Um/Sol.opus',
+      url_music: 'https://api.test/file/musics/pt/Álbum Um/Sol.mp3',
       music_version: 1,
       id_file_instrumental_music: 4,
-      url_instrumental_music: 'https://api.test/file/musics/pt/Álbum Um/Sol PB.opus',
+      url_instrumental_music: 'https://api.test/file/musics/pt/Álbum Um/Sol PB.mp3',
       instrumental_music_version: 1,
       id_language: 'pt',
       created_at: '2022-12-20T16:46:28.000000Z',
@@ -362,13 +362,15 @@ describe('listagem', () => {
       await call('/admin/files?type=music&sort_by=id_file.desc&limit=50', { token: admin })
     ).json()) as Json
     expect(body.data.map((f: Json) => f.id_file)).toEqual([4, 3])
-    expect(body.data[0].url).toBe('https://api.test/file/musics/pt/Álbum Um/Sol PB.opus')
+    // O painel mostra o arquivo cadastrado: a conversão para Opus é da publicação.
+    expect(body.data[0].url).toBe('https://api.test/file/musics/pt/Álbum Um/Sol PB.mp3')
+    expect(body.data[0].file_name).toBe('Sol PB.opus')
 
     const one = (await (await call('/admin/files/1', { token: admin })).json()) as Json
     expect(one.data).toMatchObject({
       id_file: 1,
       name: 'capa.bmp',
-      url: 'https://api.test/file/covers/capa.jpg',
+      url: 'https://api.test/file/covers/capa.bmp',
     })
   })
 })
@@ -464,7 +466,7 @@ describe('registro único', () => {
     })
     expect(data.lyric[1]).toMatchObject({
       id_file_image: 1,
-      url_image: 'https://api.test/file/covers/capa.jpg',
+      url_image: 'https://api.test/file/covers/capa.bmp',
     })
   })
 
@@ -489,7 +491,7 @@ describe('registro único', () => {
 
   it('álbum traz as músicas na ordem das faixas', async () => {
     const { data } = (await (await call('/admin/albums/1', { token: admin })).json()) as Json
-    expect(data.url_image).toBe('https://api.test/file/covers/capa.jpg')
+    expect(data.url_image).toBe('https://api.test/file/covers/capa.bmp')
     expect(data.musics.map((m: Json) => [m.track, m.id_music])).toEqual([
       [1, 1],
       [2, 7],

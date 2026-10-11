@@ -22,12 +22,23 @@ const CREATED = 'Registro cadastrado com sucesso!'
 const UPDATED = 'Registro alterado com sucesso!'
 const DELETED = 'Registro excluído com sucesso!'
 
-/** Onde a mídia é servida: a própria API, em /file. */
-const filesBase = (c: Ctx) => `${new URL(c.req.url).origin}/file`
+/**
+ * De onde sai o endereço de um arquivo. Uma base em texto aponta o arquivo que
+ * os apps atuais baixam (`file_name`, que a rotina de mídia pode ter convertido
+ * para Opus ou JPEG): é o que o catálogo publicado usa. `{ original }` aponta o
+ * arquivo cadastrado (`name`), que é o que o painel mostra — lá o padrão é o
+ * MP3, e a conversão é detalhe da publicação.
+ */
+export type FileBase = string | { original: string }
+
+/** A própria API, em /file, que resolve o nome cadastrado para o arquivo certo. */
+const filesBase = (c: Ctx): FileBase => ({ original: `${new URL(c.req.url).origin}/file` })
 
 /** URL pública de um arquivo, montada como a origem montava (base + dir + '/' + nome). */
-export const fileUrl = (base: string, alias: string) =>
-  `(${quote(base)} || ${alias}.dir || '/' || ${alias}.file_name)`
+export const fileUrl = (base: FileBase, alias: string) => {
+  const [url, column] = typeof base === 'string' ? [base, 'file_name'] : [base.original, 'name']
+  return `(${quote(url)} || ${alias}.dir || '/' || ${alias}.${column})`
+}
 
 export const MUSIC_FILES =
   'LEFT JOIN files AS files_image ON musics.id_file_image = files_image.id_file ' +
@@ -35,7 +46,7 @@ export const MUSIC_FILES =
   'LEFT JOIN files AS files_instrumental_music ' +
   'ON musics.id_file_instrumental_music = files_instrumental_music.id_file'
 
-export const musicFileColumns = (base: string): Column[] => [
+export const musicFileColumns = (base: FileBase): Column[] => [
   { key: 'id_file_image', expr: 'musics.id_file_image' },
   { key: 'url_image', expr: fileUrl(base, 'files_image'), text: true, joined: true },
   { key: 'image_version', expr: 'files_image.version', joined: true },
@@ -66,8 +77,8 @@ export type Resource = {
   table: string
   pk: string
   fillable: string[]
-  list: (base: string, query: URLSearchParams) => Listing
-  show: (db: D1Database, base: string, id: string) => Promise<Row | null>
+  list: (base: FileBase, query: URLSearchParams) => Listing
+  show: (db: D1Database, base: FileBase, id: string) => Promise<Row | null>
   /** MusicController@show devolve `{ data: null }` em vez de 404. */
   nullWhenMissing?: boolean
   validate: (v: Validator, body: Body, id: string | null) => Promise<void>
@@ -622,7 +633,7 @@ for (const resource of RESOURCES) {
 
 // --------------------------------------------------------------- arquivos
 
-export const filesSpec = (base: string): ListSpec => ({
+export const filesSpec = (base: FileBase): ListSpec => ({
   columns: [
     { key: 'id_file', expr: 'files.id_file' },
     { key: 'name', expr: 'files.name', text: true },
