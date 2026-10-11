@@ -29,15 +29,19 @@ const LEGACY_HOSTS = new Set(['api.louvorja.com.br'])
 /**
  * Reescreve os caminhos de mídia do catálogo como endereços completos.
  *
- * O áudio volta a ter o nome `.mp3`: nesse domínio ele ainda é servido pelo
- * servidor antigo, que tem os originais, porque navegadores de iPhones mais
- * velhos não tocam Opus. As imagens ficam como estão (JPEG) e saem daqui.
+ * O áudio volta a ter o nome `.mp3`, porque navegadores de iPhones mais velhos
+ * não tocam Opus. Com `audioBase` ele aponta para o armazenamento dos MP3
+ * originais; sem, sai pelo próprio domínio, onde quem responde `/file/musics`
+ * é o servidor antigo. As imagens ficam como estão (JPEG) e saem daqui.
  */
-export function legacyCatalog(text: string, origin: string): string {
+export function legacyCatalog(text: string, origin: string, audioBase?: string): string {
+  const audio = audioBase ? audioBase.replace(/\/+$/, '') : `${origin}/file`
   return text.replace(
     /"(url_[a-z_]+)":"\/(covers|images|musics)\/((?:[^"\\]|\\.)*)"/g,
     (_match, key: string, dir: string, rest: string) =>
-      `"${key}":"${origin}/file/${dir}/${dir === 'musics' ? rest.replace(/\.opus$/, '.mp3') : rest}"`,
+      dir === 'musics'
+        ? `"${key}":"${audio}/musics/${rest.replace(/\.opus$/, '.mp3')}"`
+        : `"${key}":"${origin}/file/${dir}/${rest}"`,
   )
 }
 
@@ -77,7 +81,7 @@ jsonDb.on(['GET', 'HEAD'], '/json_db/:key', async (c) => {
     const headers = new Headers(COMMON_HEADERS)
     headers.set('Content-Type', 'application/json')
     headers.set('Cache-Control', CATALOG_CACHE)
-    const body = legacyCatalog(await object.text(), url.origin)
+    const body = legacyCatalog(await object.text(), url.origin, c.env.LEGACY_AUDIO_URL)
     return new Response(c.req.method === 'HEAD' ? null : body, { headers })
   }
 

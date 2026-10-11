@@ -91,14 +91,22 @@ das rotas é desviada para este Worker (lista em `routes`, no `wrangler.jsonc`),
 para tirar a carga dele. Ficam no servidor antigo:
 
 - `/auth`, `/admin` e `/tasks`: o painel antigo, que grava no MySQL;
-- `/file/musics`: o áudio em MP3 original;
+- `/file/musics`: continua respondendo lá, mas o catálogo não aponta mais para
+  ele (ver abaixo);
 - `/health`.
 
 Quem chama `/json_db` por esse domínio é cliente antigo: o app web em
-`app.louvorja.com.br` usa os campos `url_*` como endereço pronto. Por isso, só
-nesse domínio, o catálogo sai com endereços completos e com o áudio em `.mp3`
-(servido pelo servidor antigo, porque navegadores de iPhones mais velhos não
-tocam Opus). Pelo `workers.dev` os apps recebem os caminhos relativos de sempre.
+`app.louvorja.com.br` e o app Android usam os campos `url_*` como endereço
+pronto. Por isso, só nesse domínio, o catálogo sai com endereços completos e
+com o áudio em `.mp3`, porque navegadores de iPhones mais velhos não tocam
+Opus. Pelo `workers.dev` os apps recebem os caminhos relativos de sempre.
+
+O áudio desses clientes sai de `LEGACY_AUDIO_URL` (`mp3.louvorja.com.br`), um
+domínio ligado ao bucket `files-original`: a cópia dos 5.996 arquivos originais
+da API antiga (MP3, imagens e capas), com os mesmos nomes e pastas. Assim o
+áudio não passa pelo servidor PHP — que enviava o arquivo inteiro a cada
+pedido — nem conta na cota de requisições deste Worker. Sem a variável, o
+catálogo volta a apontar para `/file/musics` do próprio domínio.
 
 Enquanto os dois sistemas existirem, `db_version` em `/params` precisa
 acompanhar o banco que está no FTP: o Delphi compara esse número com o dele e

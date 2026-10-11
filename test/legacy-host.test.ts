@@ -2,10 +2,11 @@ import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:
 import { beforeAll, describe, expect, it } from 'vitest'
 import { legacyCatalog } from '../src/features/json-db.ts'
 import worker from '../src/index.ts'
+import type { Bindings } from '../src/types.ts'
 
-const get = async (url: string) => {
+const get = async (url: string, overrides: Partial<Bindings> = {}) => {
   const ctx = createExecutionContext()
-  const response = await worker.fetch(new Request(url), env, ctx)
+  const response = await worker.fetch(new Request(url), { ...env, ...overrides } as Bindings, ctx)
   await waitOnExecutionContext(ctx)
   return response
 }
@@ -30,7 +31,7 @@ beforeAll(async () => {
 
 // O app web antigo usa os campos url_* como endereço pronto, sem prefixar nada.
 describe('catálogo pedido pelo domínio da API antiga', () => {
-  it('devolve endereços completos, com o áudio em .mp3 e as imagens como estão', async () => {
+  it('devolve endereços completos, com o áudio em .mp3 no armazenamento dos originais', async () => {
     const response = await get('https://api.louvorja.com.br/json_db/music_7?20261011')
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toBe('application/json')
@@ -38,9 +39,9 @@ describe('catálogo pedido pelo domínio da API antiga', () => {
     expect(await response.json()).toEqual({
       ...music,
       url_image: 'https://api.louvorja.com.br/file/images/hasd_018.jpg',
-      url_music: 'https://api.louvorja.com.br/file/musics/pt/Hinário/Santo, Santo.mp3',
-      url_instrumental_music:
-        'https://api.louvorja.com.br/file/musics/pt/Hinário/Santo, Santo - PB.mp3',
+      // O áudio não passa pela API nem pelo servidor antigo.
+      url_music: 'https://mp3.louvorja.com.br/musics/pt/Hinário/Santo, Santo.mp3',
+      url_instrumental_music: 'https://mp3.louvorja.com.br/musics/pt/Hinário/Santo, Santo - PB.mp3',
       albums: [{ id_album: 1, url_image: 'https://api.louvorja.com.br/file/covers/hasd.jpg' }],
       lyric: [
         {
@@ -51,6 +52,19 @@ describe('catálogo pedido pelo domínio da API antiga', () => {
         },
       ],
     })
+  })
+
+  // Sem o armazenamento configurado, o áudio volta a sair pelo próprio domínio,
+  // onde quem responde /file/musics é o servidor antigo.
+  it('aponta o áudio para o próprio domínio quando não há armazenamento configurado', async () => {
+    const response = await get('https://api.louvorja.com.br/json_db/music_7', {
+      LEGACY_AUDIO_URL: undefined,
+    })
+    const body = (await response.json()) as typeof music
+    expect(body.url_music).toBe(
+      'https://api.louvorja.com.br/file/musics/pt/Hinário/Santo, Santo.mp3',
+    )
+    expect(body.url_image).toBe('https://api.louvorja.com.br/file/images/hasd_018.jpg')
   })
 
   it('não mexe no que os apps recebem pelo endereço de sempre', async () => {
@@ -93,6 +107,10 @@ describe('catálogo pedido pelo domínio da API antiga', () => {
     const text = JSON.stringify({ url_music: '/musics/pt/A "B".opus', other: '/musics/x.opus' })
     expect(JSON.parse(legacyCatalog(text, 'https://h'))).toEqual({
       url_music: 'https://h/file/musics/pt/A "B".mp3',
+      other: '/musics/x.opus',
+    })
+    expect(JSON.parse(legacyCatalog(text, 'https://h', 'https://mp3.exemplo/'))).toEqual({
+      url_music: 'https://mp3.exemplo/musics/pt/A "B".mp3',
       other: '/musics/x.opus',
     })
   })
