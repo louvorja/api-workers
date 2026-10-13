@@ -102,7 +102,7 @@
     // Capítulos da Bíblia, um a um: é o que um robô varre. Quem quer a Bíblia
     // inteira usa /db/bible-bundle, que é um pedido só. O contador é próprio
     // (src/lib/window-counter.ts): o binding de rate limit não segura esse teto.
-    "BIBLE_LIMIT_PER_MINUTE": "60",
+    "BIBLE_LIMIT_PER_MINUTE": "150",
     // Quanto o Worker segura a resposta 429 de um capítulo da Bíblia. O robô que
     // espera cada resposta antes do próximo pedido cai para um pedido a cada
     // alguns segundos, o que também alivia a cota diária.

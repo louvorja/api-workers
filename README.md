@@ -421,7 +421,7 @@ Bindings declarados em `wrangler.jsonc`:
 - `FILES`: bucket R2 `files`;
 - `RATE_LIMIT_FILES`, `RATE_LIMIT_METADATA` e `RATE_LIMIT_GENERAL`: limites por
   minuto equivalentes aos três grupos da API PHP;
-- `BIBLE_LIMIT_PER_MINUTE` (60) e `BIBLE_THROTTLE_MS` (8000): capítulos da Bíblia por
+- `BIBLE_LIMIT_PER_MINUTE` (150) e `BIBLE_THROTTLE_MS` (8000): capítulos da Bíblia por
   minuto e por IP em `/json_db/bible_*`, contados por um Durable Object por IP
   (`src/lib/window-counter.ts`; o binding de rate limit, a Cache API e a memória do
   isolate não seguraram o teto em produção: 200 pedidos passaram por um limite de 60/min).

@@ -51,7 +51,7 @@ describe('rate limiting compatível com a API PHP', () => {
   })
 
   it('limita capítulos da Bíblia num balde próprio, mais apertado', async () => {
-    expect(rateLimitPolicy('/json_db/bible_1_1_1')).toMatchObject({ bucket: 'bible', limit: 60 })
+    expect(rateLimitPolicy('/json_db/bible_1_1_1')).toMatchObject({ bucket: 'bible', limit: 150 })
     // As listas de versões e livros não são capítulo avulso.
     expect(rateLimitPolicy('/json_db/pt_bible_version').bucket).toBe('general')
     expect(rateLimitPolicy('/db/bible-bundle').bucket).toBe('general')
@@ -78,7 +78,7 @@ describe('rate limiting compatível com a API PHP', () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(100)
     expect(denied.status).toBe(429)
     expect(denied.headers.get('x-ratelimit-bucket')).toBe('bible')
-    expect(denied.headers.get('x-ratelimit-limit')).toBe('60')
+    expect(denied.headers.get('x-ratelimit-limit')).toBe('150')
     const body = (await denied.json()) as { message: string; bucket: string }
     expect(body.bucket).toBe('bible')
     expect(body.message).toContain('/db/bible-bundle')

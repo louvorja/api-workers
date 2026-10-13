@@ -24,7 +24,7 @@ const POLICY: Record<RateLimitBucket, RateLimitPolicy> = {
   },
   general: { binding: 'RATE_LIMIT_GENERAL', bucket: 'general', limit: 5_000, period: 60 },
   // Capítulo avulso da Bíblia: só leitura de tela ou robô. Quem quer tudo usa o pacote.
-  bible: { binding: null, bucket: 'bible', limit: 60, period: 60 },
+  bible: { binding: null, bucket: 'bible', limit: 150, period: 60 },
 }
 
 const LANG_PREFIXES = new Set(['pt-BR', 'en', 'es', 'fr', 'de', 'it', 'ru', 'zh', 'ja', 'ko'])
