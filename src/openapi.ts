@@ -33,52 +33,6 @@ const NOT_FOUND = {
   },
 } as const
 
-const paginated = (summary: string, tag: string) => ({
-  tags: [tag],
-  summary,
-  parameters: [LANG, PAGE],
-  responses: {
-    200: {
-      description: 'Página de resultados.',
-      content: {
-        'application/json': {
-          schema: {
-            type: 'object',
-            properties: {
-              current_page: { type: 'integer' },
-              data: { type: 'array', items: { type: 'object' } },
-              last_page: { type: 'integer' },
-              per_page: { type: 'integer', example: 15 },
-              total: { type: 'integer' },
-              links: { type: 'array', items: { type: 'object' } },
-            },
-          },
-        },
-      },
-    },
-    404: NOT_FOUND,
-  },
-})
-
-const collections: Record<string, string> = {
-  musics: 'Músicas do catálogo',
-  albums: 'Álbuns e coletâneas',
-  categories: 'Categorias',
-  hymnal: 'Hinário corrente',
-  lyrics: 'Letras, slide a slide',
-  files: 'Registro de arquivos de mídia',
-  albums_musics: 'Associações álbum-música',
-  categories_albums: 'Associações categoria-álbum',
-  languages: 'Idiomas disponíveis',
-}
-
-const restPaths = Object.fromEntries(
-  Object.entries(collections).map(([name, summary]) => [
-    `/{lang}/${name}`,
-    { get: paginated(summary, 'REST') },
-  ]),
-)
-
 const BEARER = [{ bearerAuth: [] }]
 const ADMIN_RESOURCE = {
   name: 'resource',
@@ -126,8 +80,7 @@ export const openapi = {
       '- URLs `.mp3` entregam somente MP3; capas `.bmp` podem resolver para JPEG.',
       '- Requisições `Range` devolvem `206` de verdade. A origem ignora o header',
       '  e manda o arquivo inteiro.',
-      '- O `404` não expõe o caminho do arquivo no servidor, e `/{lang}/config`',
-      '  não expõe o caminho do banco.',
+      '- O `404` não expõe o caminho do arquivo no servidor.',
       '- `Access-Control-Allow-Credentials` foi removido: junto de',
       '  `Allow-Origin: *` ele é rejeitado por qualquer navegador.',
       '- `/ftp` faz o aperto de mão do programa Delphi: devolve o servidor de FTP',
@@ -143,7 +96,10 @@ export const openapi = {
   tags: [
     { name: 'Banco estático', description: 'Export JSON consumido pelos apps.' },
     { name: 'Arquivos', description: 'Áudio, imagens e capas.' },
-    { name: 'REST', description: 'Leitura paginada, no formato da API de origem.' },
+    {
+      name: 'REST',
+      description: 'Rotas herdadas da API PHP. As listas foram removidas; use /json_db.',
+    },
     { name: 'Sistema', description: 'Metadados, versão e diagnóstico.' },
     { name: 'Autenticação', description: 'Sessão JWT do painel.' },
     { name: 'Admin', description: 'Catálogo e usuários no D1.' },
@@ -157,6 +113,7 @@ export const openapi = {
         description:
           'Formato consumido pelos apps LouvorJA. Chaves: `config`, ' +
           '`{pt,es}_{categories,musics,hymnal,bible_book,bible_version}`, ' +
+          '`{pt,es}_{collections_online,doxology_albums,children_albums}`, ' +
           '`pt_hymnal_1996`, `album_{id}`, `music_{id}` e ' +
           '`bible_{versão}_{livro}_{capítulo}`. Para baixar a Bíblia inteira, use ' +
           '`/db/bible-bundle` em vez de pedir capítulo por capítulo. Os campos `url_*` ' +
@@ -539,6 +496,5 @@ export const openapi = {
         responses: { 200: { description: 'HTML com o iframe.' } },
       },
     },
-    ...restPaths,
   },
 }

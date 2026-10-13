@@ -357,6 +357,10 @@ describe('REST', () => {
     }
     expect(spec.info.title).toBe('LouvorJA API')
     expect(Object.keys(spec.paths)).toContain('/file/{path}')
+    // Rotas removidas não podem continuar documentadas.
+    for (const removed of ['/{lang}/musics', '/{lang}/files', '/{lang}/hymnal', '/{lang}/config']) {
+      expect(Object.keys(spec.paths), removed).not.toContain(removed)
+    }
   })
 
   // Sem isso, quem quer a Bíblia inteira só enxerga o caminho capítulo a capítulo.

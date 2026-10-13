@@ -34,8 +34,7 @@ milhões de linhas lidas, 100 mil escritas), e as rotas públicas não têm
 autenticação. Por isso:
 
 - leitura: toda rota pública responde a partir dos snapshots do R2, inclusive
-  os filtros relacionais (`id_album`, `categories_slug`, `with_albums`,
-  `with_categories`) e `/onlinevideos`;
+  `/{lang}/albums/category/{slug}`, `/{lang}/collections/online` e `/onlinevideos`;
 - escrita: a única exceção é o registro de `/download`, limitado a 500 por dia
   por um contador (`public_write_budget`). Passado o teto, nada mais é gravado.
 
@@ -219,7 +218,7 @@ O catálogo é guardado com o caminho do arquivo dentro do armazenamento
 completo, e ele aponta direto para o armazenamento: arquivo entregue por
 `/file` conta na cota diária de requisições do Worker. A troca é feita em
 `src/lib/media-urls.ts` e vale para `/json_db`, `/db`, o pacote `/db/bundle`
-e as listas/itens REST em `/pt` e `/es`, inclusive relações de álbuns e letras.
+e as rotas REST que restaram (`/{lang}/albums/category/{slug}`).
 O domínio do pedido não muda o formato:
 
 | Pedido por | Quem é | Áudio | Capas e imagens |
@@ -234,15 +233,16 @@ O domínio do pedido não muda o formato:
   pelas respostas atuais das APIs. Não se copia o MP3 para `files` quando
   a versão desse áudio já é Opus.
 
-As listas REST mantêm `Cache-Control: private` porque os links de paginação
-preservam o domínio solicitado. O catálogo e os pacotes são iguais nos dois
+`/{lang}/albums/category/{slug}` mantém `Cache-Control: private` porque os links de
+paginação preservam o domínio solicitado. O catálogo e os pacotes são iguais nos dois
 domínios; nesta migração, seus tempos e políticas de cache foram preservados.
 
-As URLs REST são conferidas contra as chaves reais do armazenamento durante
-a publicação. A lista `/files` tem um retrato adicional por idioma
-(`rest/{lang}_files_legacy.json`), com os tamanhos dos MP3 originais, mantido
-como artefato de compatibilidade. As duas APIs usam o retrato atual, em que
-`size` corresponde ao arquivo indicado em `url`.
+As URLs dos retratos REST (`rest/{lang}_*.json`) são conferidas contra as chaves
+reais do armazenamento durante a publicação. A publicação continua gerando todos
+eles, mas nenhuma rota pública serve mais a maioria (`musics`, `files`,
+`hymnal`…): ficam como insumo de `/json_db`, dos pacotes e dos scripts de
+reconciliação. O retrato `rest/{lang}_files_legacy.json` guarda os tamanhos dos
+MP3 originais; o atual tem `size` do arquivo indicado em `url`.
 Para corrigir só a mídia dos retratos existentes, sem publicar alterações do
 D1 nem mudar `db_version`: `npm run rest:media` simula;
 `npm run rest:media -- --write` grava e relê o resultado, preservando uma cópia
@@ -250,7 +250,7 @@ local dos objetos anteriores. Prepare esses retratos antes de implantar o
 Worker que os utiliza. A publicação normal também os mantém atualizados.
 
 `/file` conserva a compatibilidade entre extensões para instalações com
-catálogos antigos. Os endereços diretos entregues pelo catálogo e pelo REST
+catálogos antigos. Os endereços diretos entregues pelo catálogo
 usam a extensão que existe no armazenamento e não dependem dessa troca.
 
 O pacote completo mantém `/db/bundle` e as variantes `meta/bundle-files.zip` e
@@ -297,9 +297,9 @@ O painel usa:
 `/tasks/*` agenda o workflow `maintenance.yml` para quem chama a API com sessão
 de administrador; o painel não tem tela para isso.
 
-As listagens públicas preservam a paginação do Laravel e os filtros legados
-(`like:`, `orlike:`, `or:`, `sort_by`, `limit`, relações e idioma). As
-operações administrativas exigem JWT.
+A única listagem pública paginada que restou é `/{lang}/albums/category/{slug}`
+(descontinuada, no formato do Laravel). Os filtros legados (`like:`, `orlike:`,
+`or:`, `sort_by`, `limit`) valem só em `/admin`, que exige JWT.
 
 ## Publicação
 
