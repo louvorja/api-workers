@@ -89,7 +89,11 @@ function validateSource(source: Map<string, string>): void {
 }
 
 /** One source snapshot produces the full, catalog-only and Bible packages and exact-byte manifests. */
-export function buildBundleArtifacts(jsonDir: string, workdir: string): BundleArtifact[] {
+export function buildBundleArtifacts(
+  jsonDir: string,
+  workdir: string,
+  includeLegacy = false,
+): BundleArtifact[] {
   const source = new Map(
     readdirSync(jsonDir)
       .filter((name) => name.endsWith('.json') && !name.endsWith('_manifest.json'))
@@ -98,7 +102,10 @@ export function buildBundleArtifacts(jsonDir: string, workdir: string): BundleAr
   )
   validateSource(source)
   const artifacts: BundleArtifact[] = []
-  for (const variant of ['base', 'current', 'legacy'] as const) {
+  const variants = includeLegacy
+    ? (['base', 'current', 'legacy'] as const)
+    : (['base', 'current'] as const)
+  for (const variant of variants) {
     const data = new Map(
       [...source].map(([name, body]) => [
         name,

@@ -102,19 +102,11 @@ console.log(
 )
 
 async function rest() {
-  const [current, originals] = await Promise.all([
-    r2.mediaSizes(),
-    r2.listWithSizes('musics/', 'files-original'),
-  ])
-  const legacy = new Map([...current].filter(([key]) => !key.startsWith('musics/')))
-  for (const [key, size] of originals) legacy.set(key, size)
+  const current = await r2.mediaSizes()
   const out = new Map<string, string>()
   for await (const [key, json] of generateRest(localD1(db), API)) {
     const currentJson = reconcileRestMedia(json, current)
     out.set(key, currentJson)
-    if (/^(pt|es)_files$/.test(key)) {
-      out.set(`${key}_legacy`, reconcileRestMedia(currentJson, legacy, 'legacy'))
-    }
   }
   return out
 }
@@ -122,6 +114,10 @@ async function rest() {
 console.log('Lendo o que está publicado...')
 const manifest = JSON.parse((await text('meta/manifest.json')) ?? '[]') as ManifestEntry[]
 const state = JSON.parse((await text(STATE_KEY)) ?? '{}') as Record<string, string>
+// Os artefatos antigos ficam preservados, mas não fazem parte da publicação atual.
+for (const key of Object.keys(state)) {
+  if (/^(pt|es)_files_legacy$/.test(key)) delete state[key]
+}
 const firstRun = Object.keys(state).length === 0
 
 const workdir = mkdtempSync(join(tmpdir(), 'louvorja-publish-'))
@@ -323,7 +319,7 @@ if (
   }
   // Os pacotes com endereço de mídia saem do mesmo retrato. Se ficassem para
   // trás, a API entregaria o catálogo anterior a quem instala pelo pacote.
-  bundleVariants = buildBundleArtifacts(bundleDir, workdir)
+  bundleVariants = buildBundleArtifacts(bundleDir, workdir, false)
 }
 
 await pool([...jsonDb.puts, ...restPlan.puts], 8, (put) => upload(put.key, put.body))

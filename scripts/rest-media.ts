@@ -13,14 +13,7 @@ mkdirSync(join(workdir, 'before'))
 mkdirSync(join(workdir, 'after'))
 console.log(`Cópia de segurança e plano: ${workdir}`)
 
-const [keys, current, originals] = await Promise.all([
-  r2.list('rest/'),
-  r2.mediaSizes(),
-  r2.listWithSizes('musics/', 'files-original'),
-])
-// Capas e imagens são as mesmas nas duas variantes.
-const legacy = new Map([...current].filter(([key]) => !key.startsWith('musics/')))
-for (const [key, size] of originals) legacy.set(key, size)
+const [keys, current] = await Promise.all([r2.list('rest/'), r2.mediaSizes()])
 const puts: { key: string; before: Uint8Array | null; after: string }[] = []
 let inspected = 0
 await pool(
@@ -32,14 +25,6 @@ await pool(
     const text = new TextDecoder().decode(before)
     const after = reconcileRestMedia(text, current)
     if (after !== text) puts.push({ key, before, after })
-    if (/\/(pt|es)_files\.json$/.test(key)) {
-      const legacyKey = key.replace(/\.json$/, '_legacy.json')
-      const previous = await r2.get(legacyKey)
-      const variant = reconcileRestMedia(after, legacy, 'legacy')
-      if (new TextDecoder().decode(previous ?? undefined) !== variant) {
-        puts.push({ key: legacyKey, before: previous, after: variant })
-      }
-    }
     if (++inspected % 500 === 0) console.log(`${inspected} snapshots conferidos`)
   },
 )

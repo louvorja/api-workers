@@ -111,9 +111,10 @@ a mudança. A regeneração usa `--force` sem incrementar a versão.
 
 `ARQUIVOS_ADICIONAIS` contém 16 arquivos: executável, seis DLLs (incluindo
 `bassopus.dll`), fonte, ícone, três áudios da Escola Sabatina e quatro páginas
-HTML de `system/config/server/`. O conjunto foi recuperado do instalador
-oficial v26.11; `bassopus.dll` e `config/server/index.html` foram obtidos da
-`main` do Delphi. O executável permanece o da versão publicada v26.11.
+HTML de `system/config/server/`. O cron acompanha o último instalador oficial estável e a `main` do Delphi:
+o executável e as dependências vêm do instalador; `bassopus.dll` e as quatro
+páginas HTML vêm de um mesmo commit da `main`. Mudanças nesses arquivos
+regeneram os dois bancos SQLite sem incrementar a versão do catálogo.
 Também é possível baixar um adicional por
 `/file/system/<caminho>`, que confirma sua existência e redireciona para `files`.
 
@@ -124,17 +125,23 @@ anunciado, e a versão nunca volta para trás.
 
 ### Mídia nova
 
-Cada arquivo existe em dois lugares: o original (MP3, BMP, JPEG) no bucket
-`files-original`, com o nome antigo, e a versão dos apps atuais no bucket
-`files`. Um arquivo novo chega só de um lado — o original enviado para
-`files-original` no caminho que o catálogo registra
-(`musics/<idioma>/<álbum>/<arquivo>.mp3`, `covers/…`, `images/…`), ou o
-áudio de uma apresentação importada, gravado em `files` — e
-`npm run media:normalize` completa o outro: guarda o original e gera a versão
-convertida. A regra é a do cron antigo: MP3 acima de 128 kbps vira Opus
-(112 kbps até 160 de origem, 128 kbps acima disso); até 128 kbps o MP3 fica
-como está, porque converter não economizaria espaço e somaria uma geração de
-perda; BMP vira JPEG.
+O painel permite enviar áudio Opus ou MP3, capas BMP e imagens BMP/JPEG/PNG
+pela biblioteca. O arquivo é gravado em `files` e `files-original` com os
+mesmos bytes e a mesma extensão, sem conversão automática. Áudios usam
+`musics/<idioma>/<pasta>/<arquivo>`; capas usam `covers/` e fundos usam
+`images/`. Capas precisam ser BMP porque o Delphi exige esse formato.
+
+`POST /admin/files` exige sessão válida e permissão `files.insert` (ou
+administrador). Aceita até 50 MiB por áudio e 10 MiB por imagem, valida o
+conteúdo e recusa sobrescrever um nome já existente. O envio seleciona o
+arquivo no formulário; o cadastro da música ou álbum ainda precisa ser salvo.
+
+`npm run media:normalize` sincroniza mídia que chegou por importação ou
+diretamente ao armazenamento e confere os backups. As conversões históricas
+continuam válidas: o catálogo aponta para o arquivo já publicado, e o original
+fica preservado. BMPs ainda necessários ao Delphi são mantidos. O cron não
+cria outra versão do áudio e interrompe a publicação se faltar algum arquivo
+necessário ou se houver mídia pendente além do limite do lote.
 
 ### Bíblia fora do banco
 
@@ -325,10 +332,11 @@ Aplique-a só depois de terminar a carga inicial das letras.
 | --- | --- |
 | `npm run cutover:check` | Exige um administrador com senha válida na réplica |
 | `npm run publish` | Gera e publica os snapshots |
-| `npm run publish:gate` | Diz se o painel alterou algo desde a última publicação |
+| `npm run publish:gate` | Verifica alterações do painel, manutenção diária e tentativas pendentes |
 | `npm run catalog:diff` | Audita o que o banco gera contra o que está publicado |
-| `npm run media:normalize` | Guarda o original e gera a versão convertida da mídia nova |
+| `npm run media:normalize` | Sincroniza mídia e backup, mantendo formato e bytes |
 | `npm run files:reconcile` | Confere tamanho no R2 e duração com `ffprobe` |
+| `node --experimental-strip-types scripts/system-files.ts` | Sincroniza os 16 arquivos oficiais do programa |
 | `npm run delphi:db` | Gera e publica os bancos SQLite do Delphi |
 | `npm run delphi:version` | Anuncia a versão do Delphi lançada no GitHub |
 | `npm run bundle:variants` | Regera os pacotes com endereço de mídia |
@@ -336,8 +344,10 @@ Aplique-a só depois de terminar a carga inicial das letras.
 | `npm run slides:import` | Importa `.slja/.lja` com áudio e imagens |
 
 O workflow `maintenance.yml` é o único cron: executa esses jobs fora do limite
-curto do Worker, nesta ordem — mídia nova, reconciliação, publicação, banco do
-Delphi e versão do Delphi. As rotas `/tasks/*` só fazem um `workflow_dispatch`
+curto do Worker, nesta ordem: arquivos do programa, mídia nova, reconciliação,
+publicação, banco do Delphi e versão do Delphi. A manutenção completa ocorre
+após 24 horas da última conclusão; uma falha continua pendente para a próxima
+execução. Os arquivos do programa são conferidos mesmo sem alterações no catálogo. As rotas `/tasks/*` só fazem um `workflow_dispatch`
 autenticado. A ingestão que copiava tudo da API PHP (`ingest.yml`) foi
 desligada e não deve voltar: as duas gravariam os mesmos objetos. O agendamento
 (de hora em hora) fica desligado até a variável `MAINTENANCE_SCHEDULE` do

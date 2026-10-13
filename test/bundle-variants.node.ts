@@ -33,7 +33,7 @@ test('gera pacotes compatíveis, catálogo separado e hashes dos bytes finais de
     const jsonDir = join(workdir, 'json')
     mkdirSync(jsonDir)
     fixture(jsonDir)
-    const artifacts = buildBundleArtifacts(jsonDir, workdir)
+    const artifacts = buildBundleArtifacts(jsonDir, workdir, true)
     assert.equal(artifacts.length, 9)
     for (const variant of ['files', 'legacy']) {
       const full = artifacts.find((a) => a.key === `meta/bundle-${variant}.zip`)!
@@ -60,6 +60,25 @@ test('gera pacotes compatíveis, catálogo separado e hashes dos bytes finais de
     }
     rmSync(join(jsonDir, 'bible_1_1_1.json'))
     assert.throws(() => buildBundleArtifacts(jsonDir, workdir), /incompleto/)
+  } finally {
+    rmSync(workdir, { recursive: true, force: true })
+  }
+})
+
+test('publicação padrão produz só base e arquivos atuais, preservando Opus recebido', () => {
+  const workdir = mkdtempSync(join(tmpdir(), 'bundle-current-'))
+  try {
+    const jsonDir = join(workdir, 'json')
+    mkdirSync(jsonDir)
+    fixture(jsonDir)
+    const artifacts = buildBundleArtifacts(jsonDir, workdir)
+    assert.equal(artifacts.length, 6)
+    assert.ok(artifacts.every((artifact) => !artifact.key.includes('legacy')))
+    const current = artifacts.find((artifact) => artifact.key === 'meta/catalog-bundle-files.zip')!
+    assert.equal(
+      JSON.parse(unzipped(current.path, 'music_1.json')).url_music,
+      'https://files.louvorja.com.br/musics/pt/A/B.opus',
+    )
   } finally {
     rmSync(workdir, { recursive: true, force: true })
   }

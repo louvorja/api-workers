@@ -128,7 +128,11 @@ test('importa ZIP Delphi CP1252, preserva Opus e gera SQL idempotente', async ()
       .get()
     assert.equal(row?.name, 'Bênção do Céu')
     assert.match(String(row?.file_name), /^[a-f0-9]{64}\.opus$/)
-    assert.match(String(row?.legacy_name), /^[a-f0-9]{64}\.mp3$/)
+    assert.equal(row?.legacy_name, row?.file_name)
+    assert.equal(
+      database.prepare('SELECT count(*) total FROM files WHERE name <> file_name').get()?.total,
+      0,
+    )
     assert.equal(row?.dir, '/musics/pt/imports')
     assert.equal(row?.lyric, 'Primeira linha\nsegunda linha')
     assert.equal(row?.aux_lyric, 'First line')

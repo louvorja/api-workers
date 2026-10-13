@@ -256,10 +256,9 @@ function makeMediaAsset(
   const digest = sha256(bytes)
   const directory = kind === 'music' ? (`/musics/${language}/imports` as const) : '/images'
   const fileName = `${digest}${extension}`
-  const legacyExtension = kind === 'music' ? '.mp3' : '.bmp'
   return {
     kind,
-    legacyName: `${digest}${legacyExtension}`,
+    legacyName: fileName,
     extension,
     contentType: mediaContentType(kind, extension),
     bytes,

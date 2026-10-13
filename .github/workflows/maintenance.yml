@@ -60,7 +60,7 @@ jobs:
 
       # ffprobe (duração dos áudios) vem no pacote do ffmpeg.
       - name: Ferramentas nativas
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg zip unzip
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg zip unzip innoextract
 
       - name: Escolher tarefa
         id: task
@@ -75,15 +75,16 @@ jobs:
           else
             task="refresh_files_all"
           fi
-          # A rotina de hora em hora só segue adiante quando o painel alterou
-          # algo. Uma vez por dia ela roda inteira mesmo assim, para pegar
-          # arquivo trocado direto no R2.
           gate=false
-          if [ "$task" = "refresh_files_all" ] && [ "$(date -u +%H)" != "06" ]; then
+          if [ "$task" = "refresh_files_all" ]; then
             gate=true
           fi
           printf 'task=%s\ngate=%s\n' "$task" "$gate" >> "$GITHUB_OUTPUT"
           printf 'Executando %s (checagem prévia: %s)\n' "$task" "$gate"
+
+      - name: Arquivos do programa Delphi
+        id: system
+        run: node --env-file-if-exists=.env --experimental-strip-types scripts/system-files.ts --write
 
       # Cada export conta, na cota diária de leitura do D1, uma linha por linha
       # exportada: o banco inteiro duas vezes por hora gastaria quase toda a cota
@@ -99,11 +100,15 @@ jobs:
             printf 'changed=true\n' >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Iniciar manutenção do catálogo
+        if: steps.gate.outputs.changed == 'true'
+        run: npm run publish:gate -- --mark-start --write
+
       # As migrations não são aplicadas aqui: mudar o esquema de produção é um
       # passo manual (`wrangler d1 migrations apply louvorja --remote`), feito
       # por quem está olhando.
       - name: Exportar o banco
-        if: steps.gate.outputs.changed == 'true'
+        if: steps.gate.outputs.changed == 'true' || steps.system.outputs.changed == 'true'
         run: npx --no-install wrangler d1 export louvorja --remote --output=replica.sql
 
       - name: Atualizar vídeos online
@@ -130,10 +135,6 @@ jobs:
             npx --no-install wrangler d1 export louvorja --remote --output=replica.sql
           fi
 
-      # Arquivo novo chega só de um lado: o original enviado ao bucket dos
-      # originais, ou o áudio de uma apresentação importada. Este passo guarda o
-      # original e gera a versão dos apps atuais (Opus acima de 128 kbps, JPEG no
-      # lugar de BMP), como o cron antigo fazia ao trazer a mídia da API PHP.
       - name: Mídia nova
         id: media
         if: steps.gate.outputs.changed == 'true'
@@ -160,7 +161,6 @@ jobs:
           --task=duration
           --write
 
-      # Também quando a mídia nova gravou: o arquivo convertido tem outro tamanho.
       - name: Reconciliação completa
         if: >-
           steps.gate.outputs.changed == 'true' &&
@@ -184,16 +184,36 @@ jobs:
         if: steps.gate.outputs.changed == 'true'
         run: npm run publish -- --export=replica.sql --write
 
-      # O banco SQLite do Delphi sai do mesmo export, depois da publicação: só
-      # então a versão nova do catálogo existe. Sem versão nova, não faz nada.
+      # Arquivos do programa regeneram o SQLite mesmo sem mudar a versão do catálogo.
       - name: Banco do Delphi
-        if: steps.gate.outputs.changed == 'true'
-        run: npm run delphi:db -- --export=replica.sql --write
+        if: steps.gate.outputs.changed == 'true' || steps.system.outputs.changed == 'true'
+        env:
+          SYSTEM_CHANGED: ${{ steps.system.outputs.changed }}
+        run: |
+          if [ "$SYSTEM_CHANGED" = "true" ]; then
+            npm run delphi:db -- --export=replica.sql --force --write
+          else
+            npm run delphi:db -- --export=replica.sql --write
+          fi
+
+      - name: Confirmar arquivos do programa no banco
+        if: steps.system.outputs.changed == 'true'
+        env:
+          SYSTEM_MANIFEST: ${{ steps.system.outputs.manifest_sha256 }}
+        run: >-
+          node --env-file-if-exists=.env --experimental-strip-types scripts/system-files.ts
+          --acknowledge-db="$SYSTEM_MANIFEST" --write
 
       # Não depende do banco: publicar um lançamento final do Delphi no GitHub
       # é o que faz o programa avisar que há versão nova.
       - name: Versão do Delphi
         run: npm run delphi:version -- --write
+
+      - name: Concluir manutenção do catálogo
+        if: steps.gate.outputs.changed == 'true'
+        env:
+          FULL_MAINTENANCE: ${{ steps.task.outputs.task == 'refresh_files_all' }}
+        run: npm run publish:gate -- --mark-complete --full="$FULL_MAINTENANCE" --write
 
       - name: Relatórios
         if: always()
@@ -210,3 +230,4 @@ jobs:
             media-normalize.sql
             media-normalize-report.json
             delphi-db-report.json
+            system-files-report.json
