@@ -193,11 +193,24 @@ de remoção definida. O passo a passo para removê-la está no comentário de
 ### Rotas REST removidas
 
 Das rotas REST herdadas da API PHP só ficaram as que algum cliente usa:
-`/{lang}/albums/category/{slug}`, `/{lang}/collections/online` e
-`/{lang}/download`, além de `/player`, `/version`, `/metadata` e `/health`.
+`/{lang}/albums/category/{slug}` e `/{lang}/collections/online` (ambas já
+descontinuadas, veja abaixo) e `/{lang}/download`, além de `/player`, `/version`,
+`/metadata` e `/health`.
 `/{lang}/musics`, `/files`, `/hymnal`, `/categories`, `/albums`, `/lyrics`,
 `/languages`, `/config` e os itens por id (`/musics/{id}`, `/albums/{id}`,
 `/hymnal/{id}`) deixaram de existir: o catálogo completo está em `/json_db`.
+
+### Rotas REST descontinuadas
+
+`/{lang}/collections/online` e `/{lang}/albums/category/{slug}` seguem no ar
+só para versões antigas do violin-app e respondem com `Deprecation: true`. Os
+equivalentes no `json_db`, que devolvem a lista inteira, sem paginação:
+
+| Descontinuada | Use |
+| --- | --- |
+| `/{lang}/collections/online` | `/json_db/{lang}_collections_online` |
+| `/{lang}/albums/category/doxology` | `/json_db/{lang}_doxology_albums` |
+| `/{lang}/albums/category/children` | `/json_db/{lang}_children_albums` |
 
 ### Endereços de mídia do catálogo
 
