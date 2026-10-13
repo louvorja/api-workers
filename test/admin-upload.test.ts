@@ -269,6 +269,8 @@ describe('upload de arquivos do painel', () => {
       extraDirectory,
       form('empty.mp3', new Uint8Array()),
       form('foo.exe', mp3()),
+      form('mp3', mp3()),
+      form('opus', opus()),
       form('foo.jpg', png, 'image_album'),
       form('wrong.mp3', opus()),
       form('wrong.opus', mp3()),

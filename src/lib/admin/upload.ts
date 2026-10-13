@@ -173,7 +173,7 @@ export async function readMediaUpload(request: Request): Promise<MediaUpload> {
   const limit = type === 'music' ? AUDIO_UPLOAD_LIMIT : IMAGE_UPLOAD_LIMIT
   if (file.size > limit)
     throw new UploadError(`O arquivo excede o limite de ${type === 'music' ? 50 : 10} MiB.`, 413)
-  const extension = file.name.split('.').pop()!.toLowerCase()
+  const extension = file.name.match(/\.([^.]+)$/)?.[1]?.toLowerCase() ?? ''
   const extensions =
     type === 'music'
       ? ['mp3', 'opus']
