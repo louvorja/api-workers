@@ -8,7 +8,8 @@ export type Bindings = {
   RATE_LIMIT_FILES: RateLimit
   RATE_LIMIT_METADATA: RateLimit
   RATE_LIMIT_GENERAL: RateLimit
-  RATE_LIMIT_BIBLE: RateLimit
+  /** Capítulos da Bíblia por minuto e por IP, antes do 429. */
+  BIBLE_LIMIT_PER_MINUTE?: string
   /** Milissegundos de espera antes de responder 429 num capítulo da Bíblia. */
   BIBLE_THROTTLE_MS?: string
   JWT_SECRET: string

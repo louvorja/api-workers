@@ -57,32 +57,34 @@ describe('rate limiting compatível com a API PHP', () => {
     expect(rateLimitPolicy('/db/bible-bundle').bucket).toBe('general')
   })
 
-  it('segura o 429 da Bíblia e manda o cliente para o pacote', async () => {
-    const denied = binding(false)
+  it('conta capítulos da Bíblia por IP e segura o 429 depois do limite', async () => {
+    const chapter = async (ip: string) => {
+      const ctx = createExecutionContext()
+      const response = await worker.fetch(
+        new Request('https://api.test/json_db/bible_1_1_1', {
+          headers: { 'CF-Connecting-IP': ip },
+        }),
+        { ...env, BIBLE_LIMIT_PER_MINUTE: '3', BIBLE_THROTTLE_MS: '120' } as Bindings,
+        ctx,
+      )
+      await waitOnExecutionContext(ctx)
+      return response
+    }
+    const ip = '198.51.100.7'
+    for (let i = 0; i < 3; i++) expect((await chapter(ip)).status, `pedido ${i + 1}`).not.toBe(429)
+
     const started = Date.now()
-    const response = await call('/json_db/bible_1_1_1', {
-      RATE_LIMIT_BIBLE: denied,
-      BIBLE_THROTTLE_MS: '120',
-    })
+    const denied = await chapter(ip)
     expect(Date.now() - started).toBeGreaterThanOrEqual(100)
-    expect(response.status).toBe(429)
-    expect(response.headers.get('x-ratelimit-bucket')).toBe('bible')
-    expect(response.headers.get('x-ratelimit-limit')).toBe('60')
-    const body = (await response.json()) as { message: string; bucket: string }
+    expect(denied.status).toBe(429)
+    expect(denied.headers.get('x-ratelimit-bucket')).toBe('bible')
+    expect(denied.headers.get('x-ratelimit-limit')).toBe('60')
+    const body = (await denied.json()) as { message: string; bucket: string }
     expect(body.bucket).toBe('bible')
     expect(body.message).toContain('/db/bible-bundle')
-  })
 
-  it('não segura nem limita quando está dentro do limite', async () => {
-    const allowed = binding(true)
-    const started = Date.now()
-    const response = await call('/json_db/bible_1_1_1', {
-      RATE_LIMIT_BIBLE: allowed,
-      BIBLE_THROTTLE_MS: '5000',
-    })
-    expect(Date.now() - started).toBeLessThan(2000)
-    expect(response.status).not.toBe(429)
-    expect(allowed.limit).toHaveBeenCalledWith({ key: '192.0.2.10' })
+    // Outro IP tem a própria conta.
+    expect((await chapter('198.51.100.8')).status).not.toBe(429)
   })
 
   it('não limita health nem preflight', async () => {

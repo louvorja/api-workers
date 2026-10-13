@@ -80,13 +80,6 @@
       "name": "RATE_LIMIT_GENERAL",
       "namespace_id": "910003",
       "simple": { "limit": 5000, "period": 60 }
-    },
-    // Capítulos da Bíblia, um a um: é o que um robô varre. Quem quer a Bíblia
-    // inteira usa /db/bible-bundle, que é um pedido só.
-    {
-      "name": "RATE_LIMIT_BIBLE",
-      "namespace_id": "910004",
-      "simple": { "limit": 60, "period": 60 }
     }
   ],
 
@@ -99,6 +92,10 @@
 
   "vars": {
     "GITHUB_TASK_REF": "main",
+    // Capítulos da Bíblia, um a um: é o que um robô varre. Quem quer a Bíblia
+    // inteira usa /db/bible-bundle, que é um pedido só. O contador é próprio
+    // (src/lib/window-counter.ts): o binding de rate limit não segura esse teto.
+    "BIBLE_LIMIT_PER_MINUTE": "60",
     // Quanto o Worker segura a resposta 429 de um capítulo da Bíblia. O robô que
     // espera cada resposta antes do próximo pedido cai para um pedido a cada
     // alguns segundos, o que também alivia a cota diária.

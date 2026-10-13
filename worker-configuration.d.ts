@@ -8,7 +8,7 @@ interface __BaseEnv_Env {
 	RATE_LIMIT_FILES: RateLimit;
 	RATE_LIMIT_METADATA: RateLimit;
 	RATE_LIMIT_GENERAL: RateLimit;
-	RATE_LIMIT_BIBLE: RateLimit;
+	BIBLE_LIMIT_PER_MINUTE: "60";
 	BIBLE_THROTTLE_MS: "8000";
 	GITHUB_TASK_REF: "main";
 	GITHUB_TASK_REPO: "louvorja/api-workers";

@@ -386,7 +386,6 @@ describe('custo das rotas públicas no banco', () => {
         RATE_LIMIT_FILES: env.RATE_LIMIT_FILES,
         RATE_LIMIT_METADATA: env.RATE_LIMIT_METADATA,
         RATE_LIMIT_GENERAL: env.RATE_LIMIT_GENERAL,
-        RATE_LIMIT_BIBLE: env.RATE_LIMIT_BIBLE,
         JWT_SECRET: env.JWT_SECRET,
       },
       ctx,

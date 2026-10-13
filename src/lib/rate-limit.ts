@@ -1,16 +1,14 @@
 import type { MiddlewareHandler } from 'hono'
 import type { App, Bindings } from '../types.ts'
+import { countHit } from './window-counter.ts'
 
 export type RateLimitBucket = 'files' | 'metadata' | 'general' | 'bible'
 
-type RateLimitBinding =
-  | 'RATE_LIMIT_FILES'
-  | 'RATE_LIMIT_METADATA'
-  | 'RATE_LIMIT_GENERAL'
-  | 'RATE_LIMIT_BIBLE'
+type RateLimitBinding = 'RATE_LIMIT_FILES' | 'RATE_LIMIT_METADATA' | 'RATE_LIMIT_GENERAL'
 
 export type RateLimitPolicy = {
-  binding: RateLimitBinding
+  /** O balde `bible` não usa binding: o contador é próprio (window-counter.ts). */
+  binding: RateLimitBinding | null
   bucket: RateLimitBucket
   limit: number
   period: 60
@@ -26,7 +24,7 @@ const POLICY: Record<RateLimitBucket, RateLimitPolicy> = {
   },
   general: { binding: 'RATE_LIMIT_GENERAL', bucket: 'general', limit: 5_000, period: 60 },
   // Capítulo avulso da Bíblia: só leitura de tela ou robô. Quem quer tudo usa o pacote.
-  bible: { binding: 'RATE_LIMIT_BIBLE', bucket: 'bible', limit: 60, period: 60 },
+  bible: { binding: null, bucket: 'bible', limit: 60, period: 60 },
 }
 
 const LANG_PREFIXES = new Set(['pt-BR', 'en', 'es', 'fr', 'de', 'it', 'ru', 'zh', 'ja', 'ko'])
@@ -52,6 +50,15 @@ function limiter(env: Bindings, binding: RateLimitBinding): RateLimit {
   return env[binding]
 }
 
+async function withinLimit(c: Parameters<MiddlewareHandler<App>>[0], policy: RateLimitPolicy) {
+  const actor = c.req.header('CF-Connecting-IP') ?? 'unknown-client'
+  if (policy.binding === null) {
+    const limit = Number(c.env.BIBLE_LIMIT_PER_MINUTE ?? policy.limit) || policy.limit
+    return (await countHit(`${policy.bucket}:${actor}`, limit, policy.period)).allowed
+  }
+  return (await limiter(c.env, policy.binding).limit({ key: actor })).success
+}
+
 /**
  * O binding da Cloudflare é local ao PoP e deliberadamente aproximado. Isso é
  * suficiente para proteção contra abuso, mas não deve ser usado como medidor.
@@ -63,8 +70,7 @@ export const applyRateLimit: MiddlewareHandler<App> = async (c, next) => {
   }
 
   const policy = rateLimitPolicy(c.req.path)
-  const actor = c.req.header('CF-Connecting-IP') ?? 'unknown-client'
-  const { success } = await limiter(c.env, policy.binding).limit({ key: actor })
+  const success = await withinLimit(c, policy)
   const describe = () => {
     c.header('X-RateLimit-Limit', String(policy.limit))
     c.header('X-RateLimit-Reset', String(Math.floor(Date.now() / 1000) + policy.period))
