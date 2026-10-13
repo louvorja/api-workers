@@ -11,7 +11,7 @@ import { params } from './features/params.ts'
 import { rest } from './features/rest.ts'
 import { tasks } from './features/tasks.ts'
 import { requireSecret } from './lib/auth/session.ts'
-import { COMMON_HEADERS, isPrivatePath, notFound, PRIVATE_HEADERS } from './lib/http.ts'
+import { COMMON_HEADERS, isPrivatePath, PRIVATE_HEADERS, routeNotFound } from './lib/http.ts'
 import { applyRateLimit } from './lib/rate-limit.ts'
 import type { App } from './types.ts'
 
@@ -87,7 +87,7 @@ app.route('/', tasks)
 // /file se viesse antes das rotas específicas.
 app.route('/', rest)
 
-app.notFound(notFound)
+app.notFound(routeNotFound)
 
 app.onError((err, c) => {
   console.error('unhandled', err)

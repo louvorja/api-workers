@@ -6,7 +6,8 @@ arquivos que os apps leem.
 
 - API: `https://api.louvorja.com.br` e `https://api.louvorja.workers.dev`
   (mesmo catálogo e mesmos formatos de mídia)
-- Swagger UI: `/documentation`
+- Swagger UI: `/documentation` (um caminho que nenhuma rota atende responde 404 com
+  `"error": "Caminho não encontrado"` e o endereço dela)
 - OpenAPI: `/openapi.json`
 - Painel: `https://adm.louvorja.com.br`, no repositório
   [`louvorja/adm`](https://github.com/louvorja/adm) (GitHub Pages). Ele chama

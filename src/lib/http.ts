@@ -47,3 +47,22 @@ export function notFound(c: Context): Response {
   c.header('Cache-Control', 'no-store')
   return c.json({ error: 'Arquivo não encontrado!' }, 404)
 }
+
+/**
+ * Caminho que nenhuma rota atende (um erro de digitação, uma rota removida, um
+ * robô procurando `/.env`). Diferente de `notFound`: aqui o recurso não está
+ * faltando, a rota é que não existe, então a resposta manda o cliente para a
+ * documentação. Quem procura um arquivo ou chave que não existe continua
+ * recebendo o 404 de sempre.
+ */
+export function routeNotFound(c: Context): Response {
+  c.header('Cache-Control', 'no-store')
+  return c.json(
+    {
+      error: 'Caminho não encontrado',
+      details: 'Esta rota não existe. As rotas disponíveis estão em /documentation.',
+      documentation: new URL('/documentation', c.req.url).toString(),
+    },
+    404,
+  )
+}

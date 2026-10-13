@@ -76,6 +76,22 @@ describe('json_db', () => {
     expect(body.path).toBeUndefined()
   })
 
+  it('caminho que nenhuma rota atende manda o cliente para a documentação', async () => {
+    for (const path of ['/nao-existe', '/pt/musics', '/.env', '/json_db/a/b']) {
+      const res = await call(path)
+      expect(res.status, path).toBe(404)
+      expect(res.headers.get('cache-control'), path).toBe('no-store')
+      const body = (await res.json()) as Record<string, string>
+      expect(body.error, path).toBe('Caminho não encontrado')
+      expect(body.details, path).toContain('/documentation')
+      expect(body.documentation, path).toBe('https://api.test/documentation')
+    }
+    // Chave que não existe numa rota que existe segue como "arquivo".
+    expect(((await (await call('/json_db/nao_existe')).json()) as { error: string }).error).toBe(
+      'Arquivo não encontrado!',
+    )
+  })
+
   it('rejeita chave fora do padrão em vez de descer no bucket', async () => {
     expect((await call('/json_db/a.b')).status).toBe(404)
   })
