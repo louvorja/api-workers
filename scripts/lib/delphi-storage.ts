@@ -12,7 +12,6 @@ export const delphiDbUrl = (language: string) => `${FILES_URL}/${delphiDbKey(lan
 export function delphiHttpsParams() {
   return {
     https_files: FILES_URL,
-    https_system_files: `${FILES_URL}/system`,
     https_db_pt: delphiDbUrl('pt'),
     https_db_es: delphiDbUrl('es'),
   }
@@ -57,9 +56,11 @@ export async function publishDelphiDatabases(
     freshBody === null
       ? fallbackParams
       : (JSON.parse(new TextDecoder().decode(freshBody)) as Record<string, unknown>)
-  await storage.put(
-    DELPHI_PARAMS_KEY,
-    JSON.stringify({ ...fresh, ...delphiHttpsParams(), https_db_version: version }),
-    'application/json',
-  )
+  const params: Record<string, unknown> = {
+    ...fresh,
+    ...delphiHttpsParams(),
+    https_db_version: version,
+  }
+  delete params.https_system_files
+  await storage.put(DELPHI_PARAMS_KEY, JSON.stringify(params), 'application/json')
 }

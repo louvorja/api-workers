@@ -336,11 +336,12 @@ function applyPublishedFiles(db: DatabaseSync, published: ReadonlyMap<string, nu
   const missing: string[] = []
   for (const file of files) {
     const key = String(file.key)
+    validateDownloadKey(key)
     const size = published.get(key)
     if (size === undefined) {
       missing.push(key)
     } else {
-      if (!Number.isSafeInteger(size) || size < 0) {
+      if (!Number.isSafeInteger(size) || size <= 0) {
         throw new Error(`tamanho publicado inválido para ${key}: ${String(size)}`)
       }
       update.run(size, file.id_file as SQLInputValue)
@@ -351,6 +352,44 @@ function applyPublishedFiles(db: DatabaseSync, published: ReadonlyMap<string, nu
       `${missing.length} arquivo(s) do Delphi ausente(s) no armazenamento publicado: ` +
         missing.slice(0, 20).join(', '),
     )
+  }
+}
+
+function validateDownloadKey(value: unknown): asserts value is string {
+  if (
+    typeof value !== 'string' ||
+    !/^(musics|images|covers|system)\//.test(value) ||
+    /[\\\x00-\x1f\x7f]/.test(value) ||
+    value.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')
+  ) {
+    throw new Error(`caminho de download inválido: ${JSON.stringify(value)}`)
+  }
+}
+
+function validateDownloads(db: DatabaseSync, published?: ReadonlyMap<string, number>) {
+  const destinations = new Map<string, string>()
+  for (const table of ['ARQUIVOS_ADICIONAIS', 'ARQUIVOS_SISTEMA']) {
+    const update = db.prepare(`UPDATE ${table} SET TAMANHO = ? WHERE rowid = ?`)
+    for (const record of db.prepare(`SELECT rowid, URL, URL_DOWNLOAD FROM ${table}`).all()) {
+      const key = record.URL_DOWNLOAD
+      validateDownloadKey(key)
+      const local = String(record.URL)
+      const previous = destinations.get(local)
+      if (previous !== undefined && previous !== key) {
+        throw new Error(`download ambíguo para ${local}: ${previous}, ${key}`)
+      }
+      destinations.set(local, key)
+      if (published) {
+        const size = published.get(key)
+        if (size === undefined) {
+          throw new Error(`arquivo de download ausente no armazenamento publicado: ${key}`)
+        }
+        if (!Number.isSafeInteger(size) || size <= 0) {
+          throw new Error(`tamanho publicado inválido para ${key}: ${String(size)}`)
+        }
+        update.run(size, record.rowid as SQLInputValue)
+      }
+    }
   }
 }
 
@@ -497,9 +536,6 @@ function createLegacyObjects(
   audio: LegacyAudioMode,
 ) {
   const audioColumn = audio === 'stored' ? 'file_name' : 'name'
-  // A versão nova do Delphi passa a aceitar Opus e MP3. Imagens continuam no
-  // contrato antigo (.bmp), por isso os dois bancos apontam para o BMP real
-  // materializado na árvore legacy em vez do JPEG físico do acervo.
   const imageColumn = 'name'
   const hymnalName =
     "M.NOME || (CASE WHEN EXISTS (SELECT 1 FROM ALBUM_TIPO WHERE ALBUM_TIPO.ID_ALBUM = A.ID AND ALBUM_TIPO.TIPO = 'HASD') THEN ' (Hino nº ' || SUBSTR('00' || AM.FAIXA, -3, 3) || ') ' ELSE '' END)"
@@ -564,7 +600,16 @@ function createLegacyObjects(
       UNION ALL SELECT '10', 'LouvorJA.exe', 'LouvorJA.exe'
       UNION ALL SELECT '11', 'ssleay32.dll', 'ssleay32.dll'
       UNION ALL SELECT '12', 'libeay32.dll', 'libeay32.dll'
-      UNION ALL SELECT '13', 'louvorja_slja.ico', 'config\ico\louvorja_slja.ico';
+      UNION ALL SELECT '13', 'louvorja_slja.ico', 'config\ico\louvorja_slja.ico'
+      UNION ALL SELECT '14', 'bassopus.dll', 'bassopus.dll'
+      UNION ALL SELECT '15', '404.html', 'config\server\404.html'
+      UNION ALL SELECT '16', 'api-v2.html', 'config\server\api-v2.html'
+      UNION ALL SELECT '17', 'index.html', 'config\server\index.html'
+      UNION ALL SELECT '18', 'mirror.html', 'config\server\mirror.html';
+
+    ALTER TABLE ARQUIVOS_ADICIONAIS ADD COLUMN URL_DOWNLOAD TEXT;
+    ALTER TABLE ARQUIVOS_ADICIONAIS ADD COLUMN TAMANHO INTEGER NOT NULL DEFAULT 0;
+    UPDATE ARQUIVOS_ADICIONAIS SET URL_DOWNLOAD = 'system/' || replace(URL, '\', '/');
 
     CREATE TABLE IMAGEM_POSICAO AS
       SELECT ${imageColumn} IMAGEM, image_position POSICAO
@@ -684,19 +729,23 @@ function createLegacyObjects(
        WHERE id_language = '${language}';
 
     CREATE TABLE ARQUIVOS_SISTEMA AS
-      SELECT 'ARQUIVOS_ADICIONAIS' AS TIPO, ARQUIVO, URL, 0 AS TAMANHO,
-             '' AS TABELA, '' AS CAMPO_ARQ, '' AS CAMPO_ARQ_TAM, '' AS CHAVE
+      SELECT 'ARQUIVOS_ADICIONAIS' AS TIPO, ARQUIVO, URL, TAMANHO,
+             '' AS TABELA, '' AS CAMPO_ARQ, '' AS CAMPO_ARQ_TAM, '' AS CHAVE,
+             URL_DOWNLOAD
         FROM ARQUIVOS_ADICIONAIS
        WHERE TRIM(URL) <> ''
       UNION
       SELECT 'MUSICA', MUSICAS.URL,
              'config\musicas\' || MUSICAS.ALBUM || '\' || MUSICAS.URL,
              TAMANHO_ARQUIVO, 'MUSICAS', 'ALBUM' || '\' || URL,
-             'TAMANHO_ARQUIVO', MUSICAS.ALBUM || '\' || MUSICAS.URL
+             'TAMANHO_ARQUIVO', MUSICAS.ALBUM || '\' || MUSICAS.URL,
+             trim(file_audio.dir, '/') || '/' || file_audio.${audioColumn}
         FROM ALBUM
         INNER JOIN (MUSICAS INNER JOIN ALBUM_MUSICAS
           ON MUSICAS.ID = ALBUM_MUSICAS.ID_MUSICA)
           ON ALBUM.ID = ALBUM_MUSICAS.ID_ALBUM
+        INNER JOIN musics source_music ON source_music.id_music = MUSICAS.ID
+        LEFT JOIN files file_audio ON file_audio.id_file = source_music.id_file_music
        WHERE ((ALBUM.PERMITE_DESATIVAR = 'N') OR
               (ALBUM.PERMITE_DESATIVAR = 'S' AND
                ALBUM.ID NOT IN (SELECT ID FROM _ALBUM_IGNORAR)))
@@ -705,30 +754,44 @@ function createLegacyObjects(
       SELECT 'MUSICA_PB', MUSICAS.URL_INSTRUMENTAL,
              'config\musicas\' || MUSICAS.ALBUM || '\' || MUSICAS.URL_INSTRUMENTAL,
              TAMANHO_ARQUIVO_PB, 'MUSICAS', 'ALBUM' || '\' || URL_INSTRUMENTAL,
-             'TAMANHO_ARQUIVO_PB', MUSICAS.ALBUM || '\' || MUSICAS.URL_INSTRUMENTAL
+             'TAMANHO_ARQUIVO_PB', MUSICAS.ALBUM || '\' || MUSICAS.URL_INSTRUMENTAL,
+             trim(file_audio.dir, '/') || '/' || file_audio.${audioColumn}
         FROM ALBUM
         INNER JOIN (MUSICAS INNER JOIN ALBUM_MUSICAS
           ON MUSICAS.ID = ALBUM_MUSICAS.ID_MUSICA)
           ON ALBUM.ID = ALBUM_MUSICAS.ID_ALBUM
+        INNER JOIN musics source_music ON source_music.id_music = MUSICAS.ID
+        LEFT JOIN files file_audio ON file_audio.id_file = source_music.id_file_instrumental_music
        WHERE ((ALBUM.PERMITE_DESATIVAR = 'N') OR
               (ALBUM.PERMITE_DESATIVAR = 'S' AND
                ALBUM.ID NOT IN (SELECT ID FROM _ALBUM_IGNORAR)))
          AND TRIM(MUSICAS.URL_INSTRUMENTAL) <> '' AND TRIM(MUSICAS.ALBUM) <> ''
       UNION
-      SELECT 'IMAGEM_FUNDO', IMAGEM, 'config\imagens\' || IMAGEM,
-             TAMANHO_IMAGEM, 'MUSICAS_LETRA', 'IMAGEM', 'TAMANHO_IMAGEM', IMAGEM
-        FROM MUSICAS_LETRA WHERE TRIM(IMAGEM) <> ''
+      SELECT 'IMAGEM_FUNDO', MUSICAS_LETRA.IMAGEM, 'config\imagens\' || MUSICAS_LETRA.IMAGEM,
+             TAMANHO_IMAGEM, 'MUSICAS_LETRA', 'IMAGEM', 'TAMANHO_IMAGEM', MUSICAS_LETRA.IMAGEM,
+             trim(file_image.dir, '/') || '/' || file_image.${imageColumn}
+        FROM MUSICAS_LETRA
+        INNER JOIN lyrics source_lyric ON source_lyric.id_lyric = MUSICAS_LETRA.ID
+        LEFT JOIN files file_image ON file_image.id_file = source_lyric.id_file_image
+       WHERE TRIM(MUSICAS_LETRA.IMAGEM) <> ''
       UNION
-      SELECT 'IMAGEM_FUNDO_CAPA', IMAGEM, 'config\imagens\' || IMAGEM,
-             TAMANHO_IMAGEM, 'MUSICAS', 'IMAGEM', 'TAMANHO_IMAGEM', IMAGEM
-        FROM MUSICAS WHERE TRIM(IMAGEM) <> ''
+      SELECT 'IMAGEM_FUNDO_CAPA', MUSICAS.IMAGEM, 'config\imagens\' || MUSICAS.IMAGEM,
+             TAMANHO_IMAGEM, 'MUSICAS', 'IMAGEM', 'TAMANHO_IMAGEM', MUSICAS.IMAGEM,
+             trim(file_image.dir, '/') || '/' || file_image.${imageColumn}
+        FROM MUSICAS
+        INNER JOIN musics source_music ON source_music.id_music = MUSICAS.ID
+        LEFT JOIN files file_image ON file_image.id_file = source_music.id_file_image
+       WHERE TRIM(MUSICAS.IMAGEM) <> ''
       UNION
-      SELECT 'IMAGEM_ALBUM', IMAGEM, 'config\capas\' || IMAGEM,
-             0, '', '', '', ''
+      SELECT 'IMAGEM_ALBUM', ALBUM.IMAGEM, 'config\capas\' || ALBUM.IMAGEM,
+             file_cover.size, '', '', '', '',
+             trim(file_cover.dir, '/') || '/' || file_cover.${imageColumn}
         FROM ALBUM
-       WHERE ((PERMITE_DESATIVAR = 'N') OR
-              (PERMITE_DESATIVAR = 'S' AND ID NOT IN (SELECT ID FROM _ALBUM_IGNORAR)))
-         AND TRIM(IMAGEM) <> ''
+        INNER JOIN albums source_album ON source_album.id_album = ALBUM.ID
+        LEFT JOIN files file_cover ON file_cover.id_file = source_album.id_file_image
+       WHERE ((ALBUM.PERMITE_DESATIVAR = 'N') OR
+              (ALBUM.PERMITE_DESATIVAR = 'S' AND ALBUM.ID NOT IN (SELECT ID FROM _ALBUM_IGNORAR)))
+         AND TRIM(ALBUM.IMAGEM) <> ''
        ORDER BY ARQUIVO;
 
     CREATE VIEW LISTA_MUSICAS AS
@@ -906,6 +969,7 @@ function buildLanguageDatabase(
   requestedBibleSource: string | undefined,
   audio: LegacyAudioMode,
   missingOriginals: string[],
+  publishedFiles?: ReadonlyMap<string, number>,
 ): LegacyExportResult {
   copyFileSync(basePath, stagedPath)
   const db = new DatabaseSync(stagedPath)
@@ -933,6 +997,7 @@ function buildLanguageDatabase(
 
     dropD1OnlyObjects(db)
     createLegacyObjects(db, language, version, audio)
+    validateDownloads(db, publishedFiles)
     const unknown = (
       db
         .prepare(
@@ -1054,6 +1119,7 @@ export function exportLegacyDatabases(options: LegacyExportOptions): LegacyExpor
           options.bibleSource,
           audio,
           missingOriginals,
+          options.publishedFiles,
         ),
         stagedPath,
       })

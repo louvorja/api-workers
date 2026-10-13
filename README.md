@@ -83,8 +83,17 @@ secret, `/params` não anuncia `conn_ftp` e `/ftp` responde `410`.
 | --- | --- |
 | `https_db_version` | Versão do banco disponível por HTTPS. Compare com a do banco local |
 | `https_db_pt`, `https_db_es` | O banco SQLite de cada idioma (`config/<idioma>_database.db`) |
-| `https_files` | Base dos arquivos. Some `dir` + `/` + `file_name` da tabela `files` do banco |
-| `https_system_files` | Base dos adicionais (`files.louvorja.com.br/system`). Some `ARQUIVOS_ADICIONAIS.URL`, trocando `\` por `/` |
+| `https_files` | Base única de todos os arquivos: some `/` + `ARQUIVOS_SISTEMA.URL_DOWNLOAD` |
+
+No SQLite, `ARQUIVOS_SISTEMA.URL_DOWNLOAD` é o caminho relativo ao bucket,
+com barras `/`, por exemplo `system/bass.dll` ou
+`system/config/server/index.html`. `ARQUIVOS_SISTEMA.URL` continua sendo o
+caminho de instalação no Windows, como `bass.dll` ou `config\server\index.html`.
+O atualizador HTTPS deve usar o primeiro para baixar e o segundo para gravar
+localmente, codificando os segmentos do caminho remoto para formar a URL.
+`TAMANHO` informa os bytes do arquivo publicado. `ARQUIVOS_ADICIONAIS` também
+inclui `URL_DOWNLOAD` e `TAMANHO`. Esses campos são gerados no SQLite
+distribuído, com os tamanhos conferidos no bucket; o esquema D1 permanece igual.
 
 O banco preserva as tabelas e visões do PHP. O modo padrão `stored` usa o áudio
 realmente publicado (Opus ou MP3), mantém BMP nas imagens do Delphi e confere
@@ -95,15 +104,17 @@ anteriores em `files-original` são preservadas; `--audio=legacy` existe apenas
 para operações explícitas de compatibilidade e exige todos os originais no
 destino anunciado.
 
-Uma regeneração com `--force` pode manter o número da versão. Clientes HTTPS
-que já guardaram o banco anterior com esse número precisam baixá-lo novamente;
-a comparação de versão, sozinha, não invalida essa cópia local.
+Esta atualização mantém a versão 185. Clientes HTTPS que já guardaram um
+banco 185 sem `ARQUIVOS_SISTEMA.URL_DOWNLOAD` devem detectar a coluna ausente
+e baixar novamente o banco uma vez; comparar apenas a versão não detecta
+a mudança. A regeneração usa `--force` sem incrementar a versão.
 
-Os adicionais não faziam parte da migração do catálogo. Foram recuperados do
-instalador oficial v26.11: executável, DLLs, fonte, ícone, áudios da Escola
-Sabatina e páginas em `system/config/server/`. `system/bassopus.dll` veio da
-`main` do Delphi com suporte a Opus. Isso não transforma o executável v26.11
-em uma nova compilação. Também é possível baixar um adicional por
+`ARQUIVOS_ADICIONAIS` contém 16 arquivos: executável, seis DLLs (incluindo
+`bassopus.dll`), fonte, ícone, três áudios da Escola Sabatina e quatro páginas
+HTML de `system/config/server/`. O conjunto foi recuperado do instalador
+oficial v26.11; `bassopus.dll` e `config/server/index.html` foram obtidos da
+`main` do Delphi. O executável permanece o da versão publicada v26.11.
+Também é possível baixar um adicional por
 `/file/system/<caminho>`, que confirma sua existência e redireciona para `files`.
 
 **Versão nova do programa.** As chaves de versão e de instalador saem do

@@ -35,12 +35,12 @@ function fixtureSql(includeBibleVerses = true): string {
       (id_file, name, type, size, dir, file_name, image_position, version)
     VALUES
       (1, 'capa-pt.bmp', 'image_album', 101, '/covers', 'capa-pt.jpg', NULL, 1),
-      (2, 'faixa-pt.mp3', 'music', 102, '01234567890Album PT', 'faixa-pt.opus', NULL, 1),
-      (3, 'playback-pt.mp3', 'music', 103, '01234567890Album PT', 'playback-pt.mp3', NULL, 1),
+      (2, 'faixa-pt.mp3', 'music', 102, '/musics/pt/Album PT', 'faixa-pt.opus', NULL, 1),
+      (3, 'playback-pt.mp3', 'music', 103, '/musics/pt/Album PT', 'playback-pt.mp3', NULL, 1),
       (4, 'fundo-pt.bmp', 'image_music', 104, '/images', 'fundo-pt.jpg', 3, 1),
       (5, 'capa-es.bmp', 'cover', 105, '/covers', 'capa-es.jpg', NULL, 1),
-      (6, 'faixa-es.mp3', 'music', 106, '01234567890Album ES', 'faixa-es.opus', NULL, 1),
-      (7, 'playback-es.mp3', 'music', 107, '01234567890Album ES', 'playback-es.mp3', NULL, 1),
+      (6, 'faixa-es.mp3', 'music', 106, '/musics/es/Album ES', 'faixa-es.opus', NULL, 1),
+      (7, 'playback-es.mp3', 'music', 107, '/musics/es/Album ES', 'playback-es.mp3', NULL, 1),
       (8, 'fundo-es.bmp', 'image', 108, '/images', 'fundo-es.jpg', 4, 1);
 
     INSERT INTO albums (id_album, name, id_file_image, color, id_language)
@@ -160,6 +160,21 @@ test('gera os objetos Delphi, os campos essenciais e um banco por idioma', (cont
   for (const view of LEGACY_VIEWS) assert.equal(legacy.get(view), 'view', view)
 
   assert.deepEqual(names(db, 'VERSAO'), ['ID', 'VERSAO_BD'])
+  assert.deepEqual(names(db, 'ARQUIVOS_SISTEMA'), [
+    'TIPO',
+    'ARQUIVO',
+    'URL',
+    'TAMANHO',
+    'TABELA',
+    'CAMPO_ARQ',
+    'CAMPO_ARQ_TAM',
+    'CHAVE',
+    'URL_DOWNLOAD',
+  ])
+  assert.equal(
+    db.prepare('SELECT count(*) total FROM ARQUIVOS_ADICIONAIS WHERE TAMANHO = 0').get()?.total,
+    16,
+  )
   assert.deepEqual(names(db, 'ALBUM'), ['ID', 'NOME', 'IMAGEM', 'PERMITE_DESATIVAR'])
   assert.deepEqual(names(db, 'BIBLIA'), [
     'ID',
@@ -340,8 +355,8 @@ test('modo legacy grava no SQLite o tamanho real do MP3 materializado', (context
     outDir: join(root, 'legacy'),
     languages: ['pt'],
     legacyFileSizes: new Map([
-      ['01234567890Album PT/faixa-pt.opus', 9_001],
-      ['01234567890Album PT/playback-pt.mp3', 9_002],
+      ['musics/pt/Album PT/faixa-pt.opus', 9_001],
+      ['musics/pt/Album PT/playback-pt.mp3', 9_002],
     ]),
   })
 
@@ -362,21 +377,43 @@ test('modo legacy grava no SQLite o tamanho real do MP3 materializado', (context
   )
 })
 
+const additionalPaths = [
+  'config/1minuto_escsb.mp3',
+  'config/5minutos_escsb.mp3',
+  'config/abertura_escsb.mp3',
+  'config/fontes/din-condensed-bold.ttf',
+  'bass.dll',
+  'borlndmm.dll',
+  'midas.dll',
+  'LouvorJA.exe',
+  'ssleay32.dll',
+  'libeay32.dll',
+  'config/ico/louvorja_slja.ico',
+  'bassopus.dll',
+  'config/server/404.html',
+  'config/server/api-v2.html',
+  'config/server/index.html',
+  'config/server/mirror.html',
+]
+
 function publishedInventory() {
-  return new Map([
+  const inventory = new Map([
     ['covers/capa-pt.bmp', 8_001],
-    ['01234567890Album PT/faixa-pt.opus', 8_002],
-    ['01234567890Album PT/playback-pt.mp3', 8_003],
+    ['musics/pt/Album PT/faixa-pt.opus', 8_002],
+    ['musics/pt/Album PT/playback-pt.mp3', 8_003],
     ['images/fundo-pt.bmp', 8_004],
     ['covers/capa-es.bmp', 8_005],
-    ['01234567890Album ES/faixa-es.opus', 8_006],
-    ['01234567890Album ES/playback-es.mp3', 8_007],
+    ['musics/es/Album ES/faixa-es.opus', 8_006],
+    ['musics/es/Album ES/playback-es.mp3', 8_007],
     ['images/fundo-es.bmp', 8_008],
     // A presença do JPEG e do MP3 antigo não pode mudar a seleção do Delphi.
     ['images/fundo-pt.jpg', 4_004],
-    ['01234567890Album PT/faixa-pt.mp3', 16_002],
+    ['musics/pt/Album PT/faixa-pt.mp3', 16_002],
     ['meta/params.json', 500],
   ])
+  for (const [index, path] of additionalPaths.entries())
+    inventory.set(`system/${path}`, 10_000 + index)
+  return inventory
 }
 
 test('files, views e inventário publicado concordam no nome e tamanho de Opus, MP3 e BMP', (context) => {
@@ -455,7 +492,7 @@ test('ausência de Opus ou BMP cancela geração mesmo existindo MP3 antigo ou J
   const [before] = exportLegacyDatabases({ exportSql, outDir })
   assert.ok(before)
   const previousBytes = readFileSync(before.path)
-  for (const key of ['01234567890Album PT/faixa-pt.opus', 'images/fundo-pt.bmp']) {
+  for (const key of ['musics/pt/Album PT/faixa-pt.opus', 'images/fundo-pt.bmp']) {
     const publishedFiles = publishedInventory()
     publishedFiles.delete(key)
     assert.throws(
@@ -482,6 +519,198 @@ test('inventário publicado rejeita tamanhos inválidos e inventários conflitan
   assert.throws(() => exportLegacyDatabases({ ...options, audio: 'legacy' }), /exige audio=stored/)
   options.publishedFiles.set('images/fundo-pt.bmp', -1)
   assert.throws(() => exportLegacyDatabases(options), /tamanho publicado inválido/)
+})
+
+test('mapeia downloads PT e ES, publica os 16 adicionais e conserva a versão 185', (context) => {
+  const root = mkdtempSync(join(tmpdir(), 'louvorja-delphi-downloads-'))
+  context.after(() => rmSync(root, { recursive: true, force: true }))
+  const exportSql = join(root, 'replica.sql')
+  const source = fixtureSql().replace(
+    "'version_number', 'number', '186'",
+    "'version_number', 'number', '185'",
+  )
+  writeFileSync(exportSql, source)
+  const publishedFiles = publishedInventory()
+  const results = exportLegacyDatabases({
+    exportSql,
+    outDir: join(root, 'out'),
+    audio: 'stored',
+    versionOverride: 185,
+    publishedFiles,
+  })
+  assert.deepEqual(
+    results.map((result) => result.version),
+    [185, 185],
+  )
+  assert.equal(readFileSync(exportSql, 'utf8'), source)
+  for (const result of results) {
+    const db = new DatabaseSync(result.path, { readOnly: true })
+    context.after(() => db.close())
+    const lang = result.language
+    const album = `Album ${lang.toUpperCase()}`
+    const expected = [
+      [
+        'MUSICA',
+        `config\\musicas\\${album}\\faixa-${lang}.opus`,
+        `musics/${lang}/${album}/faixa-${lang}.opus`,
+      ],
+      [
+        'MUSICA_PB',
+        `config\\musicas\\${album}\\playback-${lang}.mp3`,
+        `musics/${lang}/${album}/playback-${lang}.mp3`,
+      ],
+      ['IMAGEM_ALBUM', `config\\capas\\capa-${lang}.bmp`, `covers/capa-${lang}.bmp`],
+      ['IMAGEM_FUNDO', `config\\imagens\\fundo-${lang}.bmp`, `images/fundo-${lang}.bmp`],
+      ['IMAGEM_FUNDO_CAPA', `config\\imagens\\fundo-${lang}.bmp`, `images/fundo-${lang}.bmp`],
+    ] as const
+    for (const [type, local, remote] of expected) {
+      assert.deepEqual(
+        {
+          ...db
+            .prepare('SELECT URL, URL_DOWNLOAD, TAMANHO FROM ARQUIVOS_SISTEMA WHERE TIPO = ?')
+            .get(type),
+        },
+        { URL: local, URL_DOWNLOAD: remote, TAMANHO: publishedFiles.get(remote) },
+      )
+    }
+    const extras = db
+      .prepare('SELECT URL, URL_DOWNLOAD, TAMANHO FROM ARQUIVOS_ADICIONAIS ORDER BY URL_DOWNLOAD')
+      .all()
+    assert.deepEqual(
+      extras.map((extra) => ({ ...extra })),
+      additionalPaths
+        .map((path) => ({
+          URL: path.replaceAll('/', '\\'),
+          URL_DOWNLOAD: `system/${path}`,
+          TAMANHO: publishedFiles.get(`system/${path}`),
+        }))
+        .sort((left, right) => (left.URL_DOWNLOAD < right.URL_DOWNLOAD ? -1 : 1)),
+    )
+    assert.equal(
+      db
+        .prepare("SELECT count(*) total FROM ARQUIVOS_SISTEMA WHERE TIPO = 'ARQUIVOS_ADICIONAIS'")
+        .get()?.total,
+      16,
+    )
+    for (const record of db.prepare('SELECT URL_DOWNLOAD, TAMANHO FROM ARQUIVOS_SISTEMA').all()) {
+      assert.equal(record.TAMANHO, publishedFiles.get(String(record.URL_DOWNLOAD)))
+      assert.ok(Number(record.TAMANHO) > 0)
+    }
+    assert.equal(db.prepare('SELECT VERSAO_BD FROM VERSAO').get()?.VERSAO_BD, 185)
+  }
+})
+
+test('nomes iguais em álbuns e idiomas distintos conservam o arquivo referenciado por ID', (context) => {
+  const root = mkdtempSync(join(tmpdir(), 'louvorja-delphi-same-name-'))
+  context.after(() => rmSync(root, { recursive: true, force: true }))
+  const exportSql = writeExport(root, 'replica.sql')
+  writeFileSync(
+    exportSql,
+    readFileSync(exportSql, 'utf8') +
+      `
+    INSERT INTO files (id_file, name, type, size, dir, file_name, version)
+      VALUES (9, 'faixa-pt.mp3', 'music', 9009, '/musics/pt/Outro Album', 'faixa-pt.opus', 1);
+    INSERT INTO albums (id_album, name, id_file_image, id_language) VALUES (3, 'Outro Album', 1, 'pt');
+    INSERT INTO musics (id_music, name, id_file_music, id_file_image, id_language)
+      VALUES (3, 'Outra música', 9, 4, 'pt');
+    INSERT INTO albums_musics (id_album_music, id_album, id_music, track, id_language)
+      VALUES (3, 3, 3, 1, 'pt');
+    UPDATE files SET name = 'faixa-pt.mp3', file_name = 'faixa-pt.opus' WHERE id_file = 6;
+  `,
+  )
+  const inventory = publishedInventory()
+  inventory.set('musics/pt/Outro Album/faixa-pt.opus', 9_009)
+  inventory.set('musics/es/Album ES/faixa-pt.opus', 8_006)
+  const results = exportLegacyDatabases({
+    exportSql,
+    outDir: join(root, 'out'),
+    audio: 'stored',
+    publishedFiles: inventory,
+  })
+  const actual = results.flatMap((result) => {
+    const db = new DatabaseSync(result.path, { readOnly: true })
+    try {
+      return db
+        .prepare(
+          "SELECT URL, URL_DOWNLOAD, TAMANHO FROM ARQUIVOS_SISTEMA WHERE TIPO = 'MUSICA' AND ARQUIVO = 'faixa-pt.opus'",
+        )
+        .all()
+        .map((record) => ({ ...record }))
+    } finally {
+      db.close()
+    }
+  })
+  assert.deepEqual(
+    actual.sort((left, right) =>
+      String(left.URL_DOWNLOAD).localeCompare(String(right.URL_DOWNLOAD)),
+    ),
+    [
+      {
+        URL: 'config\\musicas\\Album ES\\faixa-pt.opus',
+        URL_DOWNLOAD: 'musics/es/Album ES/faixa-pt.opus',
+        TAMANHO: 8_006,
+      },
+      {
+        URL: 'config\\musicas\\Album PT\\faixa-pt.opus',
+        URL_DOWNLOAD: 'musics/pt/Album PT/faixa-pt.opus',
+        TAMANHO: 8_002,
+      },
+      {
+        URL: 'config\\musicas\\Outro Album\\faixa-pt.opus',
+        URL_DOWNLOAD: 'musics/pt/Outro Album/faixa-pt.opus',
+        TAMANHO: 9_009,
+      },
+    ],
+  )
+})
+
+test('adicional ausente ou vazio impede substituir bancos existentes', (context) => {
+  const root = mkdtempSync(join(tmpdir(), 'louvorja-delphi-extra-missing-'))
+  context.after(() => rmSync(root, { recursive: true, force: true }))
+  const exportSql = writeExport(root, 'replica.sql')
+  const outDir = join(root, 'out')
+  const previous = exportLegacyDatabases({ exportSql, outDir }).map((result) => ({
+    path: result.path,
+    body: readFileSync(result.path),
+  }))
+  for (const size of [undefined, 0, -1, Number.NaN]) {
+    const publishedFiles = publishedInventory()
+    const key = 'system/config/server/index.html'
+    if (size === undefined) publishedFiles.delete(key)
+    else publishedFiles.set(key, size)
+    assert.throws(
+      () => exportLegacyDatabases({ exportSql, outDir, audio: 'stored', publishedFiles }),
+      /(?:download ausente|tamanho publicado inválido).*system\/config\/server\/index\.html/,
+    )
+    for (const result of previous) assert.deepEqual(readFileSync(result.path), result.body)
+  }
+})
+
+test('recusa caminho inseguro ou duas remotas para o mesmo destino local', (context) => {
+  const root = mkdtempSync(join(tmpdir(), 'louvorja-delphi-invalid-download-'))
+  context.after(() => rmSync(root, { recursive: true, force: true }))
+  const exportSql = join(root, 'replica.sql')
+  writeFileSync(
+    exportSql,
+    fixtureSql() + "UPDATE files SET file_name = '../escape.opus' WHERE id_file = 2;",
+  )
+  assert.throws(
+    () => exportLegacyDatabases({ exportSql, outDir: join(root, 'invalid'), audio: 'stored' }),
+    /caminho de download inválido/,
+  )
+  writeFileSync(
+    exportSql,
+    fixtureSql() +
+      `
+    INSERT INTO files (id_file, name, type, size, dir, file_name, version)
+      VALUES (9, 'fundo-pt.bmp', 'image_music', 9009, '/images/outro', 'fundo-pt.jpg', 1);
+    UPDATE lyrics SET id_file_image = 9 WHERE id_lyric = 1;
+  `,
+  )
+  assert.throws(
+    () => exportLegacyDatabases({ exportSql, outDir: join(root, 'ambiguous'), audio: 'stored' }),
+    /download ambíguo para config\\imagens\\fundo-pt\.bmp/,
+  )
 })
 
 test('preserva a Bíblia do banco anterior quando o export D1 não traz versículos', (context) => {

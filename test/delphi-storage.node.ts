@@ -61,7 +61,6 @@ test('não mascara falha de leitura como banco ausente', async () => {
 test('a troca de URLs não altera versões ou outros parâmetros', () => {
   assert.deepEqual(delphiHttpsParams(), {
     https_files: 'https://files.louvorja.com.br',
-    https_system_files: 'https://files.louvorja.com.br/system',
     https_db_pt: 'https://files.louvorja.com.br/config/pt_database.db',
     https_db_es: 'https://files.louvorja.com.br/config/es_database.db',
   })
@@ -102,13 +101,21 @@ test('falha em qualquer banco impede anúncio da versão e mantém params anteri
   }
 })
 
-test('banco stored preserva a cópia anterior dos clientes que só aceitam MP3', async () => {
+test('republica stored na versão 185, remove a base antiga e preserva originais e configurações', async () => {
   const old = bytes('banco MP3 versão 185')
+  const latest = {
+    db_version: 185,
+    https_db_version: 185,
+    https_system_files: 'https://files.louvorja.com.br/system',
+    pt_version: '26.11',
+    custom: 'atual',
+  }
   const storage = storageFixture({
     'files-original/config/pt_database.db': old,
     'files-original/config/es_database.db': old,
+    [`files/${DELPHI_PARAMS_KEY}`]: bytes(JSON.stringify(latest)),
   })
-  await publishDelphiDatabases(databases, 189, { db_version: 185 }, storage, false)
+  await publishDelphiDatabases(databases, 185, { ...latest, custom: 'antigo' }, storage, false)
   assert.deepEqual(storage.writes, [
     'files/config/pt_database.db',
     'files/config/es_database.db',
@@ -116,9 +123,34 @@ test('banco stored preserva a cópia anterior dos clientes que só aceitam MP3',
   ])
   assert.deepEqual(storage.objects.get('files-original/config/pt_database.db'), old)
   assert.deepEqual(storage.objects.get('files-original/config/es_database.db'), old)
-  assert.equal(
-    JSON.parse(new TextDecoder().decode(storage.objects.get(`files/${DELPHI_PARAMS_KEY}`)))
-      .db_version,
-    185,
+  assert.deepEqual(
+    JSON.parse(new TextDecoder().decode(storage.objects.get(`files/${DELPHI_PARAMS_KEY}`))),
+    {
+      db_version: 185,
+      https_db_version: 185,
+      pt_version: '26.11',
+      custom: 'atual',
+      ...delphiHttpsParams(),
+    },
   )
+})
+
+test('remove a base antiga também dos parâmetros de reserva sem alterar a entrada', async () => {
+  const fallback = Object.freeze({
+    db_version: 185,
+    https_system_files: 'https://files.louvorja.com.br/system',
+    custom: 'preservado',
+  })
+  const storage = storageFixture()
+  await publishDelphiDatabases(databases, 185, fallback, storage, false)
+  assert.deepEqual(
+    JSON.parse(new TextDecoder().decode(storage.objects.get(`files/${DELPHI_PARAMS_KEY}`))),
+    {
+      db_version: 185,
+      custom: 'preservado',
+      ...delphiHttpsParams(),
+      https_db_version: 185,
+    },
+  )
+  assert.equal(fallback.https_system_files, 'https://files.louvorja.com.br/system')
 })
