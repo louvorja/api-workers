@@ -87,7 +87,7 @@ export const openapi = {
       '  de onde ele baixa o acervo. O Worker não fala FTP; só entrega o endereço.',
     ].join('\n'),
   },
-  servers: [{ url: 'https://api.louvorja.workers.dev', description: 'Produção' }],
+  servers: [{ url: 'https://api.louvorja.com.br', description: 'Produção' }],
   components: {
     securitySchemes: {
       bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
