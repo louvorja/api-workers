@@ -469,6 +469,7 @@ describe('custo das rotas públicas no banco', () => {
       new Request(`https://api.test${path}`),
       {
         FILES: env.FILES,
+        FILES_ORIGINALS: env.FILES_ORIGINALS,
         DB: semBanco,
         RATE_LIMIT_FILES: env.RATE_LIMIT_FILES,
         RATE_LIMIT_METADATA: env.RATE_LIMIT_METADATA,

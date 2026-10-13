@@ -40,12 +40,15 @@
     "head_sampling_rate": 1
   },
 
-  // Bucket único: mídia (covers/, images/, musics/) e o dump do banco
-  // estático sob json_db/. Ver scripts/ingest.ts.
+  // Entrega pública em files; cópia de segurança dos uploads em files-original.
   "r2_buckets": [
     {
       "binding": "FILES",
       "bucket_name": "files"
+    },
+    {
+      "binding": "FILES_ORIGINALS",
+      "bucket_name": "files-original"
     }
   ],
 

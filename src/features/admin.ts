@@ -7,10 +7,12 @@ import {
   presentRow,
   type Where,
 } from '../lib/admin/listing.ts'
+import { readMediaUpload, storeMediaUpload, UploadError } from '../lib/admin/upload.ts'
 import { type Body, filled, Validator, validationError } from '../lib/admin/validation.ts'
 import { hashPassword } from '../lib/auth/password.ts'
 import { readBody, requireAuth } from '../lib/auth/session.ts'
 import { presentUser, type UserRow } from '../lib/auth/users.ts'
+import { FILES_URL } from '../lib/media-urls.ts'
 import { quote, sqlNow } from '../lib/sql.ts'
 import type { App } from '../types.ts'
 
@@ -22,23 +24,9 @@ const CREATED = 'Registro cadastrado com sucesso!'
 const UPDATED = 'Registro alterado com sucesso!'
 const DELETED = 'Registro excluído com sucesso!'
 
-/**
- * De onde sai o endereço de um arquivo. Uma base em texto aponta o arquivo que
- * os apps atuais baixam (`file_name`, que a rotina de mídia pode ter convertido
- * para Opus ou JPEG): é o que o catálogo publicado usa. `{ original }` aponta o
- * arquivo cadastrado (`name`), que é o que o painel mostra — lá o padrão é o
- * MP3, e a conversão é detalhe da publicação.
- */
-export type FileBase = string | { original: string }
-
-/** A própria API, em /file, que resolve o nome cadastrado para o arquivo certo. */
-const filesBase = (c: Ctx): FileBase => ({ original: `${new URL(c.req.url).origin}/file` })
-
-/** URL pública de um arquivo, montada como a origem montava (base + dir + '/' + nome). */
-export const fileUrl = (base: FileBase, alias: string) => {
-  const [url, column] = typeof base === 'string' ? [base, 'file_name'] : [base.original, 'name']
-  return `(${quote(url)} || ${alias}.dir || '/' || ${alias}.${column})`
-}
+/** Usa o objeto publicado; `name` preserva o nome original para cadastro. */
+export const fileUrl = (base: string, alias: string) =>
+  `(${quote(base)} || ${alias}.dir || '/' || ${alias}.file_name)`
 
 export const MUSIC_FILES =
   'LEFT JOIN files AS files_image ON musics.id_file_image = files_image.id_file ' +
@@ -46,7 +34,7 @@ export const MUSIC_FILES =
   'LEFT JOIN files AS files_instrumental_music ' +
   'ON musics.id_file_instrumental_music = files_instrumental_music.id_file'
 
-export const musicFileColumns = (base: FileBase): Column[] => [
+export const musicFileColumns = (base: string): Column[] => [
   { key: 'id_file_image', expr: 'musics.id_file_image' },
   { key: 'url_image', expr: fileUrl(base, 'files_image'), text: true, joined: true },
   { key: 'image_version', expr: 'files_image.version', joined: true },
@@ -77,8 +65,8 @@ export type Resource = {
   table: string
   pk: string
   fillable: string[]
-  list: (base: FileBase, query: URLSearchParams) => Listing
-  show: (db: D1Database, base: FileBase, id: string) => Promise<Row | null>
+  list: (base: string, query: URLSearchParams) => Listing
+  show: (db: D1Database, base: string, id: string) => Promise<Row | null>
   /** MusicController@show devolve `{ data: null }` em vez de 404. */
   nullWhenMissing?: boolean
   validate: (v: Validator, body: Body, id: string | null) => Promise<void>
@@ -581,12 +569,12 @@ for (const resource of RESOURCES) {
 
   admin.get(`/admin/${path}`, async (c) => {
     const url = new URL(c.req.url)
-    const { spec, pre } = resource.list(filesBase(c), url.searchParams)
+    const { spec, pre } = resource.list(FILES_URL, url.searchParams)
     return c.json(await paginate(c.env.DB, spec, url, pre))
   })
 
   admin.get(`/admin/${path}/:id`, async (c) => {
-    const row = await resource.show(c.env.DB, filesBase(c), c.req.param('id'))
+    const row = await resource.show(c.env.DB, FILES_URL, c.req.param('id'))
     if (!row && !resource.nullWhenMissing) return c.json(NOT_FOUND, 404)
     return c.json({ data: row && presentRow(row) })
   })
@@ -633,7 +621,7 @@ for (const resource of RESOURCES) {
 
 // --------------------------------------------------------------- arquivos
 
-export const filesSpec = (base: FileBase): ListSpec => ({
+export const filesSpec = (base: string): ListSpec => ({
   columns: [
     { key: 'id_file', expr: 'files.id_file' },
     { key: 'name', expr: 'files.name', text: true },
@@ -674,17 +662,79 @@ admin.get('/admin/files', async (c) => {
       params: [album, album, album, album, album],
     })
   }
-  return c.json(await paginate(c.env.DB, filesSpec(filesBase(c)), url, pre))
+  return c.json(await paginate(c.env.DB, filesSpec(FILES_URL), url, pre))
 })
 
 admin.get('/admin/files/:id', async (c) => {
-  const spec = filesSpec(filesBase(c))
+  const spec = filesSpec(FILES_URL)
   const row = await c.env.DB.prepare(
     `SELECT ${selectOf(spec.columns)} FROM files WHERE files.id_file = ?`,
   )
     .bind(c.req.param('id'))
     .first<Row>()
   return row ? c.json({ data: presentRow(row) }) : c.json(NOT_FOUND, 404)
+})
+
+admin.post('/admin/files', access('files'), async (c) => {
+  try {
+    const upload = await readMediaUpload(c.req.raw)
+    const collision = await c.env.DB.prepare(
+      'SELECT id_file FROM files WHERE dir = ? COLLATE NOCASE ' +
+        'AND (file_name = ? COLLATE NOCASE OR name = ? COLLATE NOCASE) LIMIT 1',
+    )
+      .bind(upload.dir, upload.file.name, upload.file.name)
+      .first()
+    if (collision) throw new UploadError('Já existe um arquivo com esse nome nesta pasta.', 409)
+    const config = await c.env.DB.prepare(
+      "SELECT value FROM configs WHERE key = 'version_number'",
+    ).first<{ value: string }>()
+    const version = Number(config?.value)
+    if (!Number.isSafeInteger(version) || version < 1)
+      throw new UploadError('A versão do catálogo não está disponível.', 503)
+    const now = sqlNow()
+    const values = {
+      name: upload.file.name,
+      file_name: upload.file.name,
+      type: upload.type,
+      dir: upload.dir,
+      size: upload.file.size,
+      version,
+      duration: null,
+      image_position: null,
+      created_at: now,
+      updated_at: now,
+    }
+    const created = await storeMediaUpload(upload, c.env.FILES, c.env.FILES_ORIGINALS, async () => {
+      const [result] = await c.env.DB.batch<Row>([
+        c.env.DB.prepare(
+          `INSERT INTO files (${Object.keys(values).map(ident).join(', ')}) VALUES (${Object.keys(
+            values,
+          )
+            .map(() => '?')
+            .join(', ')}) RETURNING *`,
+        ).bind(...Object.values(values)),
+        logStatement(c.env.DB, 'files', 'insert', {}, values, c.var.user),
+      ])
+      return result!.results[0]!
+    })
+    c.executionCtx.waitUntil(notifyTelegram(c.env, 'files', 'insert', {}, created, c.var.user))
+    return c.json(
+      {
+        data: presentRow({ ...created, url: `${FILES_URL}${upload.dir}/${upload.file.name}` }),
+        message: CREATED,
+      },
+      201,
+    )
+  } catch (error) {
+    if (error instanceof UploadError) {
+      const body =
+        error.status === 422
+          ? validationError({ [error.field]: [error.message] })
+          : { error: error.message, code: error.status }
+      return c.json(body, error.status)
+    }
+    throw error
+  }
 })
 
 // --------------------------------------------------------------- usuários

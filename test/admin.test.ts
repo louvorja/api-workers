@@ -256,13 +256,13 @@ describe('listagem', () => {
       id_music: 1,
       name: 'Nosso Sol é Jesus',
       id_file_image: 2,
-      url_image: 'https://api.test/file/images/fundo.jpg',
+      url_image: 'https://files.louvorja.com.br/images/fundo.jpg',
       image_version: 1,
       id_file_music: 3,
-      url_music: 'https://api.test/file/musics/pt/Álbum Um/Sol.mp3',
+      url_music: 'https://files.louvorja.com.br/musics/pt/Álbum Um/Sol.opus',
       music_version: 1,
       id_file_instrumental_music: 4,
-      url_instrumental_music: 'https://api.test/file/musics/pt/Álbum Um/Sol PB.mp3',
+      url_instrumental_music: 'https://files.louvorja.com.br/musics/pt/Álbum Um/Sol PB.opus',
       instrumental_music_version: 1,
       id_language: 'pt',
       created_at: '2022-12-20T16:46:28.000000Z',
@@ -357,20 +357,30 @@ describe('listagem', () => {
     })
   })
 
-  it('serve a biblioteca de arquivos por tipo', async () => {
+  it('serve a biblioteca com os objetos publicados, mantendo os nomes cadastrados', async () => {
+    await env.FILES.put('musics/pt/Álbum Um/Sol.opus', new Uint8Array(30))
+    await env.FILES.put('musics/pt/Álbum Um/Sol PB.opus', new Uint8Array(40))
+    await env.FILES.put('covers/capa.jpg', new Uint8Array(10))
     const body = (await (
       await call('/admin/files?type=music&sort_by=id_file.desc&limit=50', { token: admin })
     ).json()) as Json
     expect(body.data.map((f: Json) => f.id_file)).toEqual([4, 3])
-    // O painel mostra o arquivo cadastrado: a conversão para Opus é da publicação.
-    expect(body.data[0].url).toBe('https://api.test/file/musics/pt/Álbum Um/Sol PB.mp3')
+    expect(body.data[0].url).toBe('https://files.louvorja.com.br/musics/pt/Álbum Um/Sol PB.opus')
     expect(body.data[0].file_name).toBe('Sol PB.opus')
+    expect(body.data[0].name).toBe('Sol PB.mp3')
+    for (const file of body.data) {
+      const key = decodeURIComponent(new URL(file.url).pathname.slice(1))
+      expect((await env.FILES.head(key))?.size).toBe(file.size)
+      expect(await env.FILES.head(`${file.dir.slice(1)}/${file.name}`)).toBeNull()
+    }
 
     const one = (await (await call('/admin/files/1', { token: admin })).json()) as Json
     expect(one.data).toMatchObject({
       id_file: 1,
       name: 'capa.bmp',
-      url: 'https://api.test/file/covers/capa.bmp',
+      file_name: 'capa.jpg',
+      size: 10,
+      url: 'https://files.louvorja.com.br/covers/capa.jpg',
     })
   })
 })
@@ -455,18 +465,18 @@ describe('registro único', () => {
     expect(data).toMatchObject({
       id_music: 1,
       image_position: 3,
-      url_image: 'https://api.test/file/images/fundo.jpg',
+      url_image: 'https://files.louvorja.com.br/images/fundo.jpg',
     })
     expect(data.lyric).toHaveLength(2)
     expect(data.lyric[0]).toMatchObject({
       id_lyric: 10,
       id_file_image: 2,
-      url_image: 'https://api.test/file/images/fundo.jpg',
+      url_image: 'https://files.louvorja.com.br/images/fundo.jpg',
       image_position: 3,
     })
     expect(data.lyric[1]).toMatchObject({
       id_file_image: 1,
-      url_image: 'https://api.test/file/covers/capa.bmp',
+      url_image: 'https://files.louvorja.com.br/covers/capa.jpg',
     })
   })
 
@@ -491,7 +501,7 @@ describe('registro único', () => {
 
   it('álbum traz as músicas na ordem das faixas', async () => {
     const { data } = (await (await call('/admin/albums/1', { token: admin })).json()) as Json
-    expect(data.url_image).toBe('https://api.test/file/covers/capa.bmp')
+    expect(data.url_image).toBe('https://files.louvorja.com.br/covers/capa.jpg')
     expect(data.musics.map((m: Json) => [m.track, m.id_music])).toEqual([
       [1, 1],
       [2, 7],

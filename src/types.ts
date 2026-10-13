@@ -3,6 +3,7 @@ import type { User } from './lib/auth/users.ts'
 
 export type Bindings = {
   FILES: R2Bucket
+  FILES_ORIGINALS: R2Bucket
   DB: D1Database
   RATE_LIMIT_FILES: RateLimit
   RATE_LIMIT_METADATA: RateLimit

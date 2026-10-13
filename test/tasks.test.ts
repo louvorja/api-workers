@@ -18,6 +18,7 @@ type CallInit = RequestInit & {
 
 const workerBindings = (overrides: Partial<Bindings> = {}): Bindings => ({
   FILES: env.FILES,
+  FILES_ORIGINALS: env.FILES_ORIGINALS,
   DB: env.DB,
   RATE_LIMIT_FILES: env.RATE_LIMIT_FILES,
   RATE_LIMIT_METADATA: env.RATE_LIMIT_METADATA,
