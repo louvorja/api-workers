@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { type Context, Hono } from 'hono'
 import { COMMON_HEADERS, notFound } from '../lib/http.ts'
 import { MANIFEST_VARIANT_KEYS, withMediaUrls } from '../lib/media-urls.ts'
 import { serveObject } from '../lib/r2.ts'
@@ -45,6 +45,24 @@ function restSnapshotKey(key: string): string | null {
     : `rest/${lang}_categoryslug_${name?.replace(/_albums$/, '')}_albums.json`
 }
 
+/**
+ * Chave que não existe numa rota que existe: o formato de sempre ("arquivo não
+ * encontrado"), com o caminho para listar as chaves e para a documentação.
+ */
+function keyNotFound(c: Context<App>, details?: string): Response {
+  c.header('Cache-Control', 'no-store')
+  return c.json(
+    {
+      error: 'Arquivo não encontrado!',
+      details:
+        details ??
+        'Chave inexistente. Liste as chaves em /json_db; os formatos estão em /documentation.',
+      documentation: new URL('/documentation', c.req.url).toString(),
+    },
+    404,
+  )
+}
+
 export const jsonDb = new Hono<App>()
 
 // Sem chave, /json_db devolve o mesmo manifesto de /db/manifest. Precisa vir
@@ -61,18 +79,17 @@ jsonDb.on(['GET', 'HEAD'], '/json_db', async (c) => {
 
 jsonDb.on(['GET', 'HEAD'], '/json_db/:key', async (c) => {
   const key = c.req.param('key')
-  if (!KEY_RE.test(key)) return notFound(c)
+  if (!KEY_RE.test(key)) return keyNotFound(c)
 
   // Os capítulos da Bíblia não têm mídia e podem sair sem reescrita.
   if (key.startsWith('bible_')) {
     const res = await serveObject(c.env.FILES, `json_db/${key}.json`, c.req.raw, JSON_CACHE)
     if (res) return res
-    c.header('Cache-Control', 'no-store')
-    return c.json({ error: 'Arquivo não encontrado!', details: BIBLE_BUNDLE_HINT }, 404)
+    return keyNotFound(c, BIBLE_BUNDLE_HINT)
   }
 
   const object = await c.env.FILES.get(restSnapshotKey(key) ?? `json_db/${key}.json`)
-  if (object === null) return notFound(c)
+  if (object === null) return keyNotFound(c)
   const headers = new Headers(COMMON_HEADERS)
   headers.set('Content-Type', 'application/json')
   headers.set('Cache-Control', key === 'config' ? VERSION_CACHE : CATALOG_CACHE)

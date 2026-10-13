@@ -72,7 +72,9 @@ describe('json_db', () => {
     const res = await call('/json_db/nao_existe')
     expect(res.status).toBe(404)
     const body = (await res.json()) as Record<string, unknown>
-    expect(body).toEqual({ error: 'Arquivo não encontrado!' })
+    expect(body.error).toBe('Arquivo não encontrado!')
+    expect(body.details).toContain('/documentation')
+    expect(body.documentation).toBe('https://api.test/documentation')
     expect(body.path).toBeUndefined()
   })
 
@@ -408,11 +410,12 @@ describe('REST', () => {
     expect(await missing.json()).toEqual({
       error: 'Arquivo não encontrado!',
       details: 'Para baixar a Bíblia inteira use /db/bible-bundle: um ZIP com todos os capítulos.',
+      documentation: 'https://api.test/documentation',
     })
-    // Fora da Bíblia o 404 continua no formato de sempre.
-    expect(await (await call('/json_db/nao_existe')).json()).toEqual({
-      error: 'Arquivo não encontrado!',
-    })
+    // Fora da Bíblia o 404 continua com o mesmo `error`, e a dica é outra.
+    const other = (await (await call('/json_db/nao_existe')).json()) as Record<string, string>
+    expect(other.error).toBe('Arquivo não encontrado!')
+    expect(other.details).toContain('/json_db')
   })
 
   it('health não entra em cache', async () => {
