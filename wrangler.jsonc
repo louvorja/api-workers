@@ -83,6 +83,13 @@
     }
   ],
 
+  // Contador exato dos capítulos da Bíblia (src/lib/window-counter.ts): um
+  // objeto por IP. Plano gratuito exige a classe com armazenamento SQLite.
+  "durable_objects": {
+    "bindings": [{ "name": "BIBLE_LIMITER", "class_name": "WindowCounter" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WindowCounter"] }],
+
   // Declarar a lista impede o wrangler de injetar as chaves de ingestão do
   // .env como variáveis do Worker durante o dev. JWT_SECRET assina os tokens do
   // painel; em dev ele vem de .dev.vars. Os demais são opcionais e por isso

@@ -422,9 +422,10 @@ Bindings declarados em `wrangler.jsonc`:
 - `RATE_LIMIT_FILES`, `RATE_LIMIT_METADATA` e `RATE_LIMIT_GENERAL`: limites por
   minuto equivalentes aos três grupos da API PHP;
 - `BIBLE_LIMIT_PER_MINUTE` (60) e `BIBLE_THROTTLE_MS` (8000): capítulos da Bíblia por
-  minuto e por IP em `/json_db/bible_*`, contados na memória do isolate
-  (`src/lib/window-counter.ts`; o binding de rate limit não segura teto baixo: 200
-  pedidos passaram por um limite de 60/min, e a Cache API não guardou o contador). Passado o limite, o 429 é segurado por
+  minuto e por IP em `/json_db/bible_*`, contados por um Durable Object por IP
+  (`src/lib/window-counter.ts`; o binding de rate limit, a Cache API e a memória do
+  isolate não seguraram o teto em produção: 200 pedidos passaram por um limite de 60/min).
+  Se o objeto não responder, a rota segue sem limite; Passado o limite, o 429 é segurado por
   8 s para frear robô sequencial e aponta para `/db/bible-bundle`. Recusar dentro do
   Worker não poupa a cota diária (o pedido já foi contado): a proteção da cota é a
   regra de WAF da zona. Pedidos paralelos simultâneos podem passar juntos;

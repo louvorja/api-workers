@@ -15,6 +15,9 @@ import { COMMON_HEADERS, isPrivatePath, notFound, PRIVATE_HEADERS } from './lib/
 import { applyRateLimit } from './lib/rate-limit.ts'
 import type { App } from './types.ts'
 
+// O wrangler exige que a classe do Durable Object saia do módulo principal.
+export { WindowCounter } from './lib/window-counter.ts'
+
 const app = new Hono<App>()
 
 app.use('*', async (c, next) => {

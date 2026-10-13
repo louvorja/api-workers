@@ -54,7 +54,7 @@ async function withinLimit(c: Parameters<MiddlewareHandler<App>>[0], policy: Rat
   const actor = c.req.header('CF-Connecting-IP') ?? 'unknown-client'
   if (policy.binding === null) {
     const limit = Number(c.env.BIBLE_LIMIT_PER_MINUTE ?? policy.limit) || policy.limit
-    return (await countHit(`${policy.bucket}:${actor}`, limit, policy.period)).allowed
+    return (await countHit(c.env.BIBLE_LIMITER, actor, limit, policy.period)).allowed
   }
   return (await limiter(c.env, policy.binding).limit({ key: actor })).success
 }

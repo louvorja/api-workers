@@ -23,6 +23,7 @@ const workerBindings = (overrides: Partial<Bindings> = {}): Bindings => ({
   RATE_LIMIT_FILES: env.RATE_LIMIT_FILES,
   RATE_LIMIT_METADATA: env.RATE_LIMIT_METADATA,
   RATE_LIMIT_GENERAL: env.RATE_LIMIT_GENERAL,
+  BIBLE_LIMITER: env.BIBLE_LIMITER,
   JWT_SECRET: env.JWT_SECRET,
   GITHUB_TASK_TOKEN: 'github-token-test',
   GITHUB_TASK_REF: 'release-test',

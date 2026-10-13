@@ -1,5 +1,6 @@
 import type { Claims } from './lib/auth/jwt.ts'
 import type { User } from './lib/auth/users.ts'
+import type { WindowCounter } from './lib/window-counter.ts'
 
 export type Bindings = {
   FILES: R2Bucket
@@ -8,6 +9,7 @@ export type Bindings = {
   RATE_LIMIT_FILES: RateLimit
   RATE_LIMIT_METADATA: RateLimit
   RATE_LIMIT_GENERAL: RateLimit
+  BIBLE_LIMITER: DurableObjectNamespace<WindowCounter>
   /** Capítulos da Bíblia por minuto e por IP, antes do 429. */
   BIBLE_LIMIT_PER_MINUTE?: string
   /** Milissegundos de espera antes de responder 429 num capítulo da Bíblia. */

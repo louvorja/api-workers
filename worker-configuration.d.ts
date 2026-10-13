@@ -8,6 +8,7 @@ interface __BaseEnv_Env {
 	RATE_LIMIT_FILES: RateLimit;
 	RATE_LIMIT_METADATA: RateLimit;
 	RATE_LIMIT_GENERAL: RateLimit;
+	BIBLE_LIMITER: DurableObjectNamespace<import("./src/lib/window-counter").WindowCounter>;
 	BIBLE_LIMIT_PER_MINUTE: "60";
 	BIBLE_THROTTLE_MS: "8000";
 	GITHUB_TASK_REF: "main";
