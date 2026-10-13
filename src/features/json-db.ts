@@ -28,6 +28,23 @@ const VERSION_CACHE = 'private, no-cache'
 const BIBLE_BUNDLE_HINT =
   'Para baixar a Bíblia inteira use /db/bible-bundle: um ZIP com todos os capítulos.'
 
+/**
+ * Coleções que antes só existiam como rota REST (`/{lang}/collections/online`,
+ * `/{lang}/albums/category/{slug}`). Agora saem também como chave do json_db,
+ * para o app usar um caminho só. O conteúdo é o mesmo snapshot REST, sem a
+ * paginação: a lista inteira, com os endereços de mídia no formato do catálogo.
+ */
+const REST_BACKED_KEY = /^(pt|es)_(collections_online|doxology_albums|children_albums)$/
+
+function restSnapshotKey(key: string): string | null {
+  const match = REST_BACKED_KEY.exec(key)
+  if (match === null) return null
+  const [, lang, name] = match
+  return name === 'collections_online'
+    ? `rest/${lang}_collections_online.json`
+    : `rest/${lang}_categoryslug_${name?.replace(/_albums$/, '')}_albums.json`
+}
+
 export const jsonDb = new Hono<App>()
 
 // Sem chave, /json_db devolve o mesmo manifesto de /db/manifest. Precisa vir
@@ -54,7 +71,7 @@ jsonDb.on(['GET', 'HEAD'], '/json_db/:key', async (c) => {
     return c.json({ error: 'Arquivo não encontrado!', details: BIBLE_BUNDLE_HINT }, 404)
   }
 
-  const object = await c.env.FILES.get(`json_db/${key}.json`)
+  const object = await c.env.FILES.get(restSnapshotKey(key) ?? `json_db/${key}.json`)
   if (object === null) return notFound(c)
   const headers = new Headers(COMMON_HEADERS)
   headers.set('Content-Type', 'application/json')

@@ -176,6 +176,18 @@ IP.
 Quem pede `/file/musics/<faixa>.mp3` recebe um redirecionamento para `files`
 somente quando esse MP3 existe lá. A API não entrega Opus com nome de MP3.
 
+### Rotas REST descontinuadas
+
+`/{lang}/collections/online` e `/{lang}/albums/category/{slug}` seguem no ar
+só para versões antigas do violin-app e respondem com `Deprecation: true`. Os
+equivalentes no `json_db`, que devolvem a lista inteira, sem paginação:
+
+| Descontinuada | Use |
+| --- | --- |
+| `/{lang}/collections/online` | `/json_db/{lang}_collections_online` |
+| `/{lang}/albums/category/doxology` | `/json_db/{lang}_doxology_albums` |
+| `/{lang}/albums/category/children` | `/json_db/{lang}_children_albums` |
+
 ### Endereços de mídia do catálogo
 
 O catálogo é guardado com o caminho do arquivo dentro do armazenamento

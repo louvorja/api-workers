@@ -32,6 +32,32 @@ beforeAll(async () => {
 })
 
 describe('json_db', () => {
+  it('serve as coleções que antes eram só REST como chaves do json_db', async () => {
+    await env.FILES.put(
+      'rest/pt_categoryslug_doxology_albums.json',
+      JSON.stringify([{ id_album: 9, url_image: '/covers/9.jpg' }]),
+    )
+    const online = await call('/json_db/pt_collections_online')
+    expect(online.status).toBe(200)
+    expect(await online.json()).toEqual({ channels: [], playlists: [], videos: [] })
+
+    const doxology = await call('/json_db/pt_doxology_albums')
+    expect(doxology.status).toBe(200)
+    expect(doxology.headers.get('cache-control')).toBe('private, max-age=86400')
+    expect(await doxology.json()).toEqual([
+      { id_album: 9, url_image: 'https://files.louvorja.com.br/covers/9.jpg' },
+    ])
+    expect((await call('/json_db/pt_children_albums')).status).toBe(404)
+    expect((await call('/json_db/fr_collections_online')).status).toBe(404)
+  })
+
+  it('marca as rotas REST equivalentes como descontinuadas', async () => {
+    for (const path of ['/pt/collections/online', '/pt/albums/category/doxology']) {
+      expect((await call(path)).headers.get('deprecation'), path).toBe('true')
+    }
+    expect((await call('/json_db/pt_collections_online')).headers.get('deprecation')).toBeNull()
+  })
+
   it('serve um arquivo existente', async () => {
     const res = await call('/json_db/music_1')
     expect(res.status).toBe(200)

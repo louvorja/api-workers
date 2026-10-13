@@ -504,7 +504,12 @@ export const openapi = {
     '/{lang}/albums/category/{slug}': {
       get: {
         tags: ['REST'],
-        summary: 'Álbuns de uma categoria, por slug',
+        deprecated: true,
+        summary: 'Álbuns de uma categoria, por slug (será descontinuado)',
+        description:
+          '**Será descontinuado.** Para `doxology` e `children` use ' +
+          '`/json_db/{lang}_doxology_albums` e `/json_db/{lang}_children_albums`, ' +
+          'que devolvem a lista inteira, sem paginação.',
         parameters: [
           LANG,
           { name: 'slug', in: 'path', required: true, schema: { type: 'string' }, example: 'aym' },
@@ -524,7 +529,9 @@ export const openapi = {
     '/{lang}/collections/online': {
       get: {
         tags: ['REST'],
-        summary: 'Catálogo de conteúdo online',
+        deprecated: true,
+        summary: 'Catálogo de conteúdo online (será descontinuado)',
+        description: '**Será descontinuado.** Use `/json_db/{lang}_collections_online`.',
         parameters: [LANG],
         responses: { 200: { description: 'Catálogo.' } },
       },

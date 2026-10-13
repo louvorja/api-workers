@@ -1,4 +1,4 @@
-import { type Context, Hono } from 'hono'
+import { type Context, Hono, type MiddlewareHandler } from 'hono'
 import { COMMON_HEADERS, notFound } from '../lib/http.ts'
 import { type MediaVariant, withMediaUrls } from '../lib/media-urls.ts'
 import { paginate } from '../lib/paginate.ts'
@@ -676,6 +676,18 @@ for (const path of ['/:lang/albums/:id', '/:lang/album/:id']) {
 }
 
 const SLUG_RE = /^[a-zA-Z0-9_-]+$/
+
+/**
+ * DESCONTINUADAS: as duas rotas abaixo têm chave equivalente no json_db
+ * (`{lang}_doxology_albums`, `{lang}_children_albums`, `{lang}_collections_online`).
+ * Seguem no ar só para versões antigas do violin-app.
+ */
+const markDeprecated: MiddlewareHandler<App> = async (c, next) => {
+  await next()
+  c.header('Deprecation', 'true')
+}
+rest.use('/:lang/albums/category/:slug', markDeprecated)
+rest.use('/:lang/collections/online', markDeprecated)
 
 rest.get('/:lang/albums/category/:slug', async (c) => {
   const lang = c.req.param('lang') as string
