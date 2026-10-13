@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type MiddlewareHandler } from 'hono'
 import { COMMON_HEADERS, notFound } from '../lib/http.ts'
 import { FILES_URL } from '../lib/media-urls.ts'
 import { serveObject } from '../lib/r2.ts'
@@ -32,7 +32,24 @@ function candidates(path: string): string[] {
  */
 const PUBLIC_PREFIXES = ['covers/', 'images/', 'musics/', 'system/']
 
+/**
+ * DESCONTINUADO. O catálogo já entrega o endereço completo do arquivo, direto
+ * no armazenamento, e cada arquivo servido por aqui conta na cota diária de
+ * requisições do Worker. A rota segue funcionando só para quem ainda monta
+ * `/file/...` sozinho (Flute 1.9.x, Piano, catálogos antigos guardados).
+ *
+ * Para remover de vez: apague este arquivo, a linha `app.route('/', files)` em
+ * `src/index.ts`, o bloco `/file/{path}` em `src/openapi.ts`, a regra `files`
+ * em `src/lib/rate-limit.ts` e os testes do bloco `file` em `test/api.test.ts`.
+ */
 export const files = new Hono<App>()
+
+const markDeprecated: MiddlewareHandler<App> = async (c, next) => {
+  await next()
+  c.header('Deprecation', 'true')
+}
+files.use('/file', markDeprecated)
+files.use('/file/*', markDeprecated)
 
 // HEAD na raiz é o teste de disponibilidade do desktop (download/index.js).
 files.on(['GET', 'HEAD'], '/file', (c) => c.body(null, 200, COMMON_HEADERS))

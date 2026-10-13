@@ -176,6 +176,29 @@ IP.
 Quem pede `/file/musics/<faixa>.mp3` recebe um redirecionamento para `files`
 somente quando esse MP3 existe lá. A API não entrega Opus com nome de MP3.
 
+### Descontinuação do `/file`
+
+> **O `/file/*` será descontinuado.** O catálogo (`/json_db`, `/db`) já entrega o
+> endereço completo de cada arquivo (`url_music`, `url_image`), apontando direto
+> para `https://files.louvorja.com.br`. Cliente novo deve usar esse endereço e não
+> montar `/file/...` sozinho: cada arquivo servido pelo Worker conta na cota
+> diária de 100 mil requisições.
+
+Enquanto a rota existir, toda resposta de `/file` traz `Deprecation: true`, e o
+`openapi.json` a marca como `deprecated`. Ainda dependem dela o Flute 1.9.x, o
+Piano e instalações com catálogo antigo guardado (caminho relativo). Não há data
+de remoção definida. O passo a passo para removê-la está no comentário de
+`src/features/files.ts`.
+
+### Rotas REST removidas
+
+Das rotas REST herdadas da API PHP só ficaram as que algum cliente usa:
+`/{lang}/albums/category/{slug}`, `/{lang}/collections/online` e
+`/{lang}/download`, além de `/player`, `/version`, `/metadata` e `/health`.
+`/{lang}/musics`, `/files`, `/hymnal`, `/categories`, `/albums`, `/lyrics`,
+`/languages`, `/config` e os itens por id (`/musics/{id}`, `/albums/{id}`,
+`/hymnal/{id}`) deixaram de existir: o catálogo completo está em `/json_db`.
+
 ### Endereços de mídia do catálogo
 
 O catálogo é guardado com o caminho do arquivo dentro do armazenamento

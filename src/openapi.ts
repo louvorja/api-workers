@@ -236,8 +236,14 @@ export const openapi = {
     '/file/{path}': {
       get: {
         tags: ['Arquivos'],
-        summary: 'Servir mídia e arquivos adicionais',
+        deprecated: true,
+        summary: 'Servir mídia e arquivos adicionais (será descontinuado)',
         description:
+          '**Será descontinuado.** Use o endereço completo que o catálogo já entrega ' +
+          '(`url_music`, `url_image`), que aponta direto para o armazenamento ' +
+          '(`https://files.louvorja.com.br`). Cada arquivo servido aqui conta na cota ' +
+          'diária de requisições do Worker. As respostas trazem o cabeçalho ' +
+          '`Deprecation: true`. ' +
           'Prefixos válidos: `covers/`, `images/`, `musics/` e `system/`. ' +
           'Arquivos `system/` e músicas `.mp3` existentes redirecionam para ' +
           '`https://files.louvorja.com.br/{path}` com cache de uma hora. ' +
@@ -477,30 +483,6 @@ export const openapi = {
         },
       },
     },
-    '/{lang}/config': {
-      get: {
-        tags: ['REST'],
-        summary: 'Configurações da aplicação',
-        parameters: [LANG],
-        responses: { 200: { description: 'Configurações.' }, 404: NOT_FOUND },
-      },
-    },
-    '/{lang}/musics/{id}': {
-      get: {
-        tags: ['REST'],
-        summary: 'Música por id, com a letra slide a slide',
-        parameters: [LANG, ID],
-        responses: { 200: { description: 'Música.' }, 404: NOT_FOUND },
-      },
-    },
-    '/{lang}/albums/{id}': {
-      get: {
-        tags: ['REST'],
-        summary: 'Álbum por id',
-        parameters: [LANG, ID],
-        responses: { 200: { description: 'Álbum.' }, 404: NOT_FOUND },
-      },
-    },
     '/{lang}/albums/category/{slug}': {
       get: {
         tags: ['REST'],
@@ -510,14 +492,6 @@ export const openapi = {
           { name: 'slug', in: 'path', required: true, schema: { type: 'string' }, example: 'aym' },
           PAGE,
         ],
-        responses: { 200: { description: 'Página de álbuns.' }, 404: NOT_FOUND },
-      },
-    },
-    '/{lang}/categories/{id}/albums': {
-      get: {
-        tags: ['REST'],
-        summary: 'Álbuns de uma categoria, por id',
-        parameters: [LANG, ID, PAGE],
         responses: { 200: { description: 'Página de álbuns.' }, 404: NOT_FOUND },
       },
     },
@@ -538,24 +512,6 @@ export const openapi = {
           302: { description: 'Redirecionamento para o GitHub Releases.' },
           404: NOT_FOUND,
         },
-      },
-    },
-    '/{lang}/hymnal/{id}': {
-      get: {
-        tags: ['REST'],
-        summary: 'Hino por id',
-        description: 'Devolve a linha do hinário, sem envelope. Id que não seja hino dá 404.',
-        parameters: [LANG, ID],
-        responses: { 200: { description: 'Hino.' }, 404: NOT_FOUND },
-      },
-    },
-    '/{lang}/categories/{id}/albums-with-musics': {
-      get: {
-        tags: ['REST'],
-        summary: 'Categoria com álbuns e suas músicas',
-        description: 'Resposta única, sem paginação: `{ category, albums }`.',
-        parameters: [LANG, ID],
-        responses: { 200: { description: 'Categoria expandida.' }, 404: NOT_FOUND },
       },
     },
     '/player': {

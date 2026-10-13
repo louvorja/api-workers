@@ -19,11 +19,9 @@ beforeAll(async () => {
   await env.FILES.put('musics/pt/A/So Mp3.mp3', new Uint8Array(50))
 
   await env.FILES.put(
-    'rest/pt_hymnal.json',
-    JSON.stringify(Array.from({ length: 40 }, (_, i) => ({ id_music: i + 1 }))),
+    'rest/pt_categoryslug_doxology_albums.json',
+    JSON.stringify(Array.from({ length: 40 }, (_, i) => ({ id_album: i + 1 }))),
   )
-  await env.FILES.put('rest/pt_config.json', JSON.stringify({ version: '185' }))
-  await env.FILES.put('rest/pt_music_7.json', JSON.stringify({ id_music: 7, lyric: [] }))
   await env.FILES.put(
     'rest/pt_collections_online.json',
     JSON.stringify({ channels: [], playlists: [], videos: [] }),
@@ -76,6 +74,13 @@ describe('bundles', () => {
 })
 
 describe('file', () => {
+  it('avisa que o /file será descontinuado em toda resposta', async () => {
+    for (const path of ['/file/covers/1992.jpg', '/file/covers/nao-existe.jpg', '/file']) {
+      expect((await call(path)).headers.get('deprecation'), path).toBe('true')
+    }
+    expect((await call('/json_db/music_1')).headers.get('deprecation')).toBeNull()
+  })
+
   it('serve nome com reticências, mas não deixa subir de diretório', async () => {
     await env.FILES.put('musics/pt/A/Mundo...Paz.opus', new Uint8Array(7))
     const res = await call(`/file/musics/pt/A/${encodeURIComponent('Mundo...Paz.opus')}`)
@@ -237,7 +242,7 @@ describe('cabeçalhos', () => {
 
 describe('REST', () => {
   it('pagina no envelope do Laravel, 15 por página', async () => {
-    const res = await call('/pt/hymnal')
+    const res = await call('/pt/albums/category/doxology')
     const body = (await res.json()) as Record<string, unknown>
     expect(body.total).toBe(40)
     expect(body.per_page).toBe(15)
@@ -248,7 +253,10 @@ describe('REST', () => {
   })
 
   it('respeita ?page e calcula from/to', async () => {
-    const body = (await (await call('/pt/hymnal?page=3')).json()) as Record<string, unknown>
+    const body = (await (await call('/pt/albums/category/doxology?page=3')).json()) as Record<
+      string,
+      unknown
+    >
     expect(body.current_page).toBe(3)
     expect((body.data as unknown[]).length).toBe(10)
     expect(body.from).toBe(31)
@@ -257,19 +265,15 @@ describe('REST', () => {
   })
 
   it('trava página fora do intervalo na última', async () => {
-    const body = (await (await call('/pt/hymnal?page=999')).json()) as Record<string, unknown>
+    const body = (await (await call('/pt/albums/category/doxology?page=999')).json()) as Record<
+      string,
+      unknown
+    >
     expect(body.current_page).toBe(3)
   })
 
-  it('serve config e item de música', async () => {
-    expect(await (await call('/pt/config')).json()).toEqual({ data: { version: '185' } })
-    expect(await (await call('/pt/musics/7')).json()).toEqual({
-      data: { id_music: 7, lyric: [] },
-    })
-  })
-
   it('rejeita idioma desconhecido', async () => {
-    expect((await call('/fr/hymnal')).status).toBe(404)
+    expect((await call('/fr/collections/online')).status).toBe(404)
     expect((await call('/pt/inexistente')).status).toBe(404)
   })
 
@@ -301,7 +305,7 @@ describe('REST', () => {
     expect((await call('/health')).status).toBe(200)
     expect((await call('/version')).status).toBe(200)
     expect((await call('/player')).status).toBe(200)
-    expect((await call('/pt')).status).toBe(200)
+    expect((await call('/pt')).status).toBe(404)
     expect((await call('/xx')).status).toBe(404)
   })
 
@@ -367,7 +371,9 @@ describe('REST', () => {
       'public, max-age=86400, stale-while-revalidate=604800',
     )
     expect(await cacheOf('/db/config')).toBe('private, max-age=3600')
-    expect(await cacheOf('/pt/config')).toBe('public, max-age=3600, stale-while-revalidate=86400')
+    expect(await cacheOf('/pt/collections/online')).toBe(
+      'public, max-age=3600, stale-while-revalidate=86400',
+    )
     expect(await cacheOf('/onlinevideos')).toBe(
       'public, max-age=3600, stale-while-revalidate=86400',
     )

@@ -77,7 +77,11 @@ describe('rate limiting compatível com a API PHP', () => {
   it('informa o limite também nas respostas montadas à mão', async () => {
     await env.FILES.put('meta/params.json', JSON.stringify({ db_version: 185 }))
     await env.FILES.put('json_db/config.json', JSON.stringify({ version_number: 185 }))
-    for (const path of ['/params', '/json_db/config', '/pt']) {
+    await env.FILES.put(
+      'rest/pt_collections_online.json',
+      JSON.stringify({ channels: [], playlists: [], videos: [] }),
+    )
+    for (const path of ['/params', '/json_db/config', '/pt/collections/online']) {
       const response = await call(path)
       expect(response.status, path).toBe(200)
       expect(response.headers.get('x-ratelimit-bucket'), path).toBe('general')

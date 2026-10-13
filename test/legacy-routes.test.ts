@@ -352,94 +352,6 @@ describe('contratos legados complementares', () => {
     ).toBe(3)
   })
 
-  it('aplica sort_by e limit nas nove coleções', async () => {
-    const cases = [
-      ['languages', 'id_language', 'pt'],
-      ['musics', 'id_music', 11],
-      ['categories', 'id_category', 2],
-      ['categories_albums', 'id_category_album', 2],
-      ['albums', 'id_album', 2],
-      ['albums_musics', 'id_album_music', 2],
-      ['lyrics', 'id_lyric', 21],
-      ['hymnal', 'id_music', 11],
-      ['files', 'id_file', 6],
-    ] as const
-
-    for (const [name, field, expected] of cases) {
-      const body = (await (await call(`/pt/${name}?sort_by=${field}.desc&limit=1`)).json()) as Json
-      expect(body.per_page, name).toBe(1)
-      expect(body.data[0][field], name).toBe(expected)
-    }
-  })
-
-  it('aplica os campos filtráveis de todas as coleções, inclusive like e booleano', async () => {
-    const cases = [
-      ['languages', 'language=like:*portugues*', 'id_language', 'pt'],
-      ['musics', 'name=like:*coracao*', 'id_music', 10],
-      ['categories', 'type=hymnal', 'id_category', 2],
-      ['categories_albums', 'category_name=like:*colecao*', 'id_category_album', 2],
-      ['albums', 'color=%23222222', 'id_album', 2],
-      ['albums_musics', 'track=2', 'id_album_music', 2],
-      ['lyrics', 'show_slide=true', 'id_lyric', 20],
-      ['hymnal', 'name=like:*hino*', 'id_music', 10],
-      ['files', 'duration=00%3A04%3A00', 'id_file', 4],
-    ] as const
-
-    for (const [name, query, field, expected] of cases) {
-      const body = (await (await call(`/pt/${name}?${query}`)).json()) as Json
-      expect(body.total, name).toBe(1)
-      expect(body.data[0][field], name).toBe(expected)
-    }
-  })
-
-  it('preserva a combinação or: da origem', async () => {
-    const body = (await (
-      await call('/pt/musics?id_music=10&name=or:%C3%A1rvore%20da%20vida&sort_by=id_music')
-    ).json()) as Json
-    expect(body.data.map((row: Json) => row.id_music)).toEqual([10, 11])
-  })
-
-  it('resolve filtros relacionais pelos snapshots sem mudar as linhas padrão', async () => {
-    const musics = (await (await call('/pt/musics?id_album=1')).json()) as Json
-    expect(musics.data.map((row: Json) => row.id_music)).toEqual([10])
-
-    const lyrics = (await (await call('/pt/lyrics?id_album=1')).json()) as Json
-    expect(lyrics.data.map((row: Json) => row.id_lyric)).toEqual([20])
-
-    const files = (await (
-      await call('/pt/files?id_album=1&sort_by=id_file&limit=-1')
-    ).json()) as Json
-    expect(files.data.map((row: Json) => row.id_file)).toEqual([1, 2, 3, 4, 5])
-
-    const albums = (await (await call('/pt/albums?categories_slug=hymnal')).json()) as Json
-    expect(albums.data).toEqual([
-      expect.objectContaining({ id_album: 1, subtitle: 'Coletânea', order: 4 }),
-    ])
-
-    const defaults = (await (await call('/pt/albums')).json()) as Json
-    expect(defaults.data[0]).toMatchObject({ id_album: 1, subtitle: '', order: '' })
-  })
-
-  it('expande with_albums e with_categories como os relacionamentos do Eloquent', async () => {
-    const musics = (await (await call('/pt/musics?id_music=10&with_albums=1')).json()) as Json
-    expect(musics.data[0].albums).toEqual([
-      expect.objectContaining({
-        id_album: 1,
-        name: 'Primeiro álbum',
-        pivot: { id_music: 10, id_album: 1, track: 1 },
-      }),
-    ])
-
-    const albums = (await (await call('/pt/albums?id_album=1&with_categories=1')).json()) as Json
-    expect(albums.data[0].categories).toEqual([
-      expect.objectContaining({
-        id_category: 2,
-        name: 'Hinário',
-        pivot: { id_album: 1, id_category: 2, name: 'Coletânea', order: 4 },
-      }),
-    ])
-  })
-
   it('filtra /admin/files por todos os arquivos ligados ao álbum', async () => {
     const body = (await (
       await call('/admin/files?id_album=1&sort_by=id_file&limit=-1', { token })
@@ -482,7 +394,7 @@ describe('custo das rotas públicas no banco', () => {
     return res
   }
 
-  it('responde catálogo, filtros e vídeos online sem tocar o D1', async () => {
+  it('responde catálogo e vídeos online sem tocar o D1', async () => {
     await env.FILES.put(
       'rest/pt_collections_online.json',
       JSON.stringify({ channels: [], playlists: [], videos: [] }),
@@ -492,14 +404,7 @@ describe('custo das rotas públicas no banco', () => {
       '/db/catalog',
       '/db/catalog/categories?column=kind',
       '/json_db/catalog',
-      '/pt/musics',
-      '/pt/musics?id_album=1',
-      '/pt/musics?name=like:*cora*&sort_by=name.desc',
-      '/pt/musics?id_music=10&with_albums=1',
-      '/pt/lyrics?id_album=1',
-      '/pt/files?id_album=1&limit=-1',
-      '/pt/albums?categories_slug=hymnal',
-      '/pt/albums?id_album=1&with_categories=1',
+      '/pt/collections/online',
       '/onlinevideos',
       '/onlinevideos?tipo=videos&id=qualquer',
       '/onlinevideos?format=json&lang=pt',
