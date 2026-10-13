@@ -109,7 +109,7 @@ export const openapi = {
     '/json_db/{key}': {
       get: {
         tags: ['Banco estático'],
-        summary: 'Tabela JSON no formato plano (legado)',
+        summary: 'Catálogo e Bíblia em JSON (formato dos apps)',
         description:
           'Formato consumido pelos apps LouvorJA. Chaves: `config`, ' +
           '`{pt,es}_{categories,musics,hymnal,bible_book,bible_version}`, ' +
@@ -175,8 +175,10 @@ export const openapi = {
     '/db/{table}': {
       get: {
         tags: ['Banco estático'],
-        summary: 'Tabela JSON no formato novo, paginado',
-        description: 'Mesmo conteúdo de `/json_db/{key}`, embrulhado em `{ data, meta }`.',
+        summary: 'Tabela JSON em envelope, paginada',
+        description:
+          'Mesmo conteúdo de `/json_db/{key}`, embrulhado em `{ data, meta }` e paginado. ' +
+          'Os apps usam `/json_db`.',
         parameters: [
           { name: 'table', in: 'path', required: true, schema: { type: 'string' } },
           PAGE,
