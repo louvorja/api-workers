@@ -1,3 +1,5 @@
+import { jsonDbPaths, jsonDbTag } from './openapi-json-db.ts'
+
 const LANG = {
   name: 'lang',
   in: 'path',
@@ -94,7 +96,8 @@ export const openapi = {
     },
   },
   tags: [
-    { name: 'Banco estático', description: 'Export JSON consumido pelos apps.' },
+    jsonDbTag,
+    { name: 'Banco estático', description: 'Pacotes ZIP e tabelas em envelope.' },
     { name: 'Arquivos', description: 'Áudio, imagens e capas.' },
     {
       name: 'REST',
@@ -106,31 +109,7 @@ export const openapi = {
     { name: 'Tarefas', description: 'Despacho de jobs operacionais.' },
   ],
   paths: {
-    '/json_db/{key}': {
-      get: {
-        tags: ['Banco estático'],
-        summary: 'Catálogo e Bíblia em JSON (formato dos apps)',
-        description:
-          'Formato consumido pelos apps LouvorJA. Chaves: `config`, ' +
-          '`{pt,es}_{categories,musics,hymnal,bible_book,bible_version}`, ' +
-          '`{pt,es}_{collections_online,doxology_albums,children_albums}`, ' +
-          '`pt_hymnal_1996`, `album_{id}`, `music_{id}` e ' +
-          '`bible_{versão}_{livro}_{capítulo}`. Para baixar a Bíblia inteira, use ' +
-          '`/db/bible-bundle` em vez de pedir capítulo por capítulo. Os campos `url_*` ' +
-          'trazem o endereço completo do arquivo de mídia, direto no armazenamento: ' +
-          'baixe dele, e não de `/file`.',
-        parameters: [
-          {
-            name: 'key',
-            in: 'path',
-            required: true,
-            schema: { type: 'string', pattern: '^[a-zA-Z0-9_-]+$' },
-            example: 'pt_categories',
-          },
-        ],
-        responses: { 200: { description: 'Conteúdo da tabela.' }, 404: NOT_FOUND },
-      },
-    },
+    ...jsonDbPaths,
     '/db/manifest': {
       get: {
         tags: ['Banco estático'],

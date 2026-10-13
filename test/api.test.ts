@@ -357,6 +357,17 @@ describe('REST', () => {
     }
     expect(spec.info.title).toBe('LouvorJA API')
     expect(Object.keys(spec.paths)).toContain('/file/{path}')
+    // O json_db tem uma entrada por chave, com o formato da resposta.
+    for (const documented of [
+      '/json_db',
+      '/json_db/config',
+      '/json_db/music_{id}',
+      '/json_db/{lang}_musics',
+      '/json_db/bible_{version}_{book}_{chapter}',
+      '/json_db/{lang}_doxology_albums',
+    ]) {
+      expect(Object.keys(spec.paths), documented).toContain(documented)
+    }
     // Rotas removidas não podem continuar documentadas.
     for (const removed of ['/{lang}/musics', '/{lang}/files', '/{lang}/hymnal', '/{lang}/config']) {
       expect(Object.keys(spec.paths), removed).not.toContain(removed)
