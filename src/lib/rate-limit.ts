@@ -1,9 +1,13 @@
 import type { MiddlewareHandler } from 'hono'
 import type { App, Bindings } from '../types.ts'
 
-export type RateLimitBucket = 'files' | 'metadata' | 'general'
+export type RateLimitBucket = 'files' | 'metadata' | 'general' | 'bible'
 
-type RateLimitBinding = 'RATE_LIMIT_FILES' | 'RATE_LIMIT_METADATA' | 'RATE_LIMIT_GENERAL'
+type RateLimitBinding =
+  | 'RATE_LIMIT_FILES'
+  | 'RATE_LIMIT_METADATA'
+  | 'RATE_LIMIT_GENERAL'
+  | 'RATE_LIMIT_BIBLE'
 
 export type RateLimitPolicy = {
   binding: RateLimitBinding
@@ -21,6 +25,8 @@ const POLICY: Record<RateLimitBucket, RateLimitPolicy> = {
     period: 60,
   },
   general: { binding: 'RATE_LIMIT_GENERAL', bucket: 'general', limit: 5_000, period: 60 },
+  // Capítulo avulso da Bíblia: só leitura de tela ou robô. Quem quer tudo usa o pacote.
+  bible: { binding: 'RATE_LIMIT_BIBLE', bucket: 'bible', limit: 60, period: 60 },
 }
 
 const LANG_PREFIXES = new Set(['pt-BR', 'en', 'es', 'fr', 'de', 'it', 'ru', 'zh', 'ja', 'ko'])
@@ -36,6 +42,7 @@ function normalizedPath(path: string): string {
 /** Mantém as mesmas três classes e tetos por minuto da API PHP. */
 export function rateLimitPolicy(path: string): RateLimitPolicy {
   const normalized = normalizedPath(path)
+  if (normalized.startsWith('/json_db/bible_')) return POLICY.bible
   if (normalized.startsWith('/file/') || normalized.startsWith('/player')) return POLICY.files
   if (['/version', '/version_log', '/metadata'].includes(normalized)) return POLICY.metadata
   return POLICY.general
@@ -65,6 +72,12 @@ export const applyRateLimit: MiddlewareHandler<App> = async (c, next) => {
   }
 
   if (!success) {
+    // Quem varre capítulo por capítulo espera cada resposta antes do próximo
+    // pedido; segurar o 429 desacelera esse robô, e recusar na hora não.
+    if (policy.bucket === 'bible') {
+      const wait = Number(c.env.BIBLE_THROTTLE_MS ?? 0)
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait))
+    }
     describe()
     c.header('X-RateLimit-Remaining', '0')
     c.header('Retry-After', String(policy.period))
@@ -72,7 +85,10 @@ export const applyRateLimit: MiddlewareHandler<App> = async (c, next) => {
     return c.json(
       {
         error: 'Too Many Requests',
-        message: 'Limite de requisicoes excedido. Tente novamente em breve.',
+        message:
+          policy.bucket === 'bible'
+            ? 'Limite de capítulos excedido. Para a Bíblia inteira use /db/bible-bundle, um arquivo só.'
+            : 'Limite de requisicoes excedido. Tente novamente em breve.',
         retry_after: policy.period,
         bucket: policy.bucket,
       },

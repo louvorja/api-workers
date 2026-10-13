@@ -80,6 +80,13 @@
       "name": "RATE_LIMIT_GENERAL",
       "namespace_id": "910003",
       "simple": { "limit": 5000, "period": 60 }
+    },
+    // Capítulos da Bíblia, um a um: é o que um robô varre. Quem quer a Bíblia
+    // inteira usa /db/bible-bundle, que é um pedido só.
+    {
+      "name": "RATE_LIMIT_BIBLE",
+      "namespace_id": "910004",
+      "simple": { "limit": 60, "period": 60 }
     }
   ],
 
@@ -92,6 +99,10 @@
 
   "vars": {
     "GITHUB_TASK_REF": "main",
+    // Quanto o Worker segura a resposta 429 de um capítulo da Bíblia. O robô que
+    // espera cada resposta antes do próximo pedido cai para um pedido a cada
+    // alguns segundos, o que também alivia a cota diária.
+    "BIBLE_THROTTLE_MS": "8000",
     "GITHUB_TASK_REPO": "louvorja/api-workers"
   }
 }

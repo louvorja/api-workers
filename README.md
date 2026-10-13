@@ -421,6 +421,11 @@ Bindings declarados em `wrangler.jsonc`:
 - `FILES`: bucket R2 `files`;
 - `RATE_LIMIT_FILES`, `RATE_LIMIT_METADATA` e `RATE_LIMIT_GENERAL`: limites por
   minuto equivalentes aos três grupos da API PHP;
+- `RATE_LIMIT_BIBLE`: 60 capítulos por minuto por IP em `/json_db/bible_*`. Passado o
+  limite, a resposta 429 é segurada por `BIBLE_THROTTLE_MS` (8 s) para frear robô
+  sequencial; o 429 aponta para `/db/bible-bundle`. Recusar dentro do Worker não
+  poupa a cota diária (o pedido já foi contado): a proteção da cota é a regra de
+  WAF da zona;
 - `JWT_SECRET` (obrigatório): assinatura das sessões do painel;
 - `GITHUB_TASK_TOKEN` (opcional): token restrito a Actions para `/tasks`. Sem
   ele, `/tasks` responde `503` e o resto funciona;

@@ -50,6 +50,41 @@ describe('rate limiting compatível com a API PHP', () => {
     expect(denied.limit).toHaveBeenCalledWith({ key: '192.0.2.10' })
   })
 
+  it('limita capítulos da Bíblia num balde próprio, mais apertado', async () => {
+    expect(rateLimitPolicy('/json_db/bible_1_1_1')).toMatchObject({ bucket: 'bible', limit: 60 })
+    // As listas de versões e livros não são capítulo avulso.
+    expect(rateLimitPolicy('/json_db/pt_bible_version').bucket).toBe('general')
+    expect(rateLimitPolicy('/db/bible-bundle').bucket).toBe('general')
+  })
+
+  it('segura o 429 da Bíblia e manda o cliente para o pacote', async () => {
+    const denied = binding(false)
+    const started = Date.now()
+    const response = await call('/json_db/bible_1_1_1', {
+      RATE_LIMIT_BIBLE: denied,
+      BIBLE_THROTTLE_MS: '120',
+    })
+    expect(Date.now() - started).toBeGreaterThanOrEqual(100)
+    expect(response.status).toBe(429)
+    expect(response.headers.get('x-ratelimit-bucket')).toBe('bible')
+    expect(response.headers.get('x-ratelimit-limit')).toBe('60')
+    const body = (await response.json()) as { message: string; bucket: string }
+    expect(body.bucket).toBe('bible')
+    expect(body.message).toContain('/db/bible-bundle')
+  })
+
+  it('não segura nem limita quando está dentro do limite', async () => {
+    const allowed = binding(true)
+    const started = Date.now()
+    const response = await call('/json_db/bible_1_1_1', {
+      RATE_LIMIT_BIBLE: allowed,
+      BIBLE_THROTTLE_MS: '5000',
+    })
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(response.status).not.toBe(429)
+    expect(allowed.limit).toHaveBeenCalledWith({ key: '192.0.2.10' })
+  })
+
   it('não limita health nem preflight', async () => {
     const denied = binding(false)
     const health = await call('/health', {

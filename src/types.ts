@@ -8,6 +8,9 @@ export type Bindings = {
   RATE_LIMIT_FILES: RateLimit
   RATE_LIMIT_METADATA: RateLimit
   RATE_LIMIT_GENERAL: RateLimit
+  RATE_LIMIT_BIBLE: RateLimit
+  /** Milissegundos de espera antes de responder 429 num capítulo da Bíblia. */
+  BIBLE_THROTTLE_MS?: string
   JWT_SECRET: string
   GITHUB_TASK_TOKEN?: string
   GITHUB_TASK_REF?: string
