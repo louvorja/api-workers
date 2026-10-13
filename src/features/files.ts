@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { COMMON_HEADERS, notFound } from '../lib/http.ts'
-import { ORIGINALS_URL } from '../lib/media-urls.ts'
+import { FILES_URL } from '../lib/media-urls.ts'
 import { serveObject } from '../lib/r2.ts'
 import type { App } from '../types.ts'
 
@@ -16,9 +16,7 @@ import type { App } from '../types.ts'
  */
 function candidates(path: string): string[] {
   const lower = path.toLowerCase()
-  // Quem pede `.mp3` recebe MP3: o que está aqui com esse nome, ou o original
-  // (ver o redirecionamento abaixo). Entregar o Opus com nome de MP3 deixava
-  // mudo quem só toca MP3, que é justamente quem ainda pede por esse nome.
+  // Clientes que pedem MP3 podem não decodificar Opus; não troque o codec.
   if (lower.endsWith('.mp3')) return [path]
   if (lower.endsWith('.bmp')) return [`${path.slice(0, -4)}.jpg`, path]
   // Caminho inverso: os JSONs pedem .opus, mas parte do acervo veio de fontes
@@ -30,12 +28,9 @@ function candidates(path: string): string[] {
 }
 
 /**
- * Prefixos que /file expõe. O bucket também guarda o dump do banco em json_db/
- * e os arquivos de meta/, que têm rota própria e validação de chave própria —
- * servi-los aqui daria um caminho não validado para dentro do mesmo bucket e
- * acoplaria a API pública ao layout interno de armazenamento.
+ * json_db/ e meta/ têm rotas e validações próprias; não devem ser expostos por /file.
  */
-const MEDIA_PREFIXES = ['covers/', 'images/', 'musics/']
+const PUBLIC_PREFIXES = ['covers/', 'images/', 'musics/', 'system/']
 
 export const files = new Hono<App>()
 
@@ -53,9 +48,20 @@ files.on(['GET', 'HEAD'], '/file/*', async (c) => {
 
   // Só o segmento ".." sobe de diretório. Barrar a sequência em qualquer lugar
   // derrubava faixas com reticências no nome ("Pode Cair o Mundo...Estou em Paz").
-  if (path === '' || path.startsWith('/')) return notFound(c)
-  if (path.split('/').some((segment) => segment === '..')) return notFound(c)
-  if (!MEDIA_PREFIXES.some((prefix) => path.startsWith(prefix))) return notFound(c)
+  if (path === '' || /[\\\x00-\x1f\x7f]/.test(path)) return notFound(c)
+  if (path.split('/').some((segment) => segment === '' || segment === '.' || segment === '..'))
+    return notFound(c)
+  if (!PUBLIC_PREFIXES.some((prefix) => path.startsWith(prefix))) return notFound(c)
+
+  // Verifica o objeto exato antes do redirect: uma faixa só em Opus não satisfaz
+  // um pedido de MP3, e um nome inexistente deve continuar respondendo 404.
+  if (path.startsWith('system/') || (path.startsWith('musics/') && /\.mp3$/i.test(path))) {
+    if ((await c.env.FILES.head(path)) === null) return notFound(c)
+    const headers = new Headers(COMMON_HEADERS)
+    headers.set('Location', `${FILES_URL}/${path.split('/').map(encodeURIComponent).join('/')}`)
+    headers.set('Cache-Control', 'public, max-age=3600')
+    return new Response(null, { status: 302, headers })
+  }
 
   for (const key of candidates(path)) {
     const res = await serveObject(
@@ -67,12 +73,5 @@ files.on(['GET', 'HEAD'], '/file/*', async (c) => {
     if (res) return res
   }
 
-  // A faixa foi convertida para Opus: o MP3 dela está no bucket dos originais.
-  if (path.startsWith('musics/') && path.toLowerCase().endsWith('.mp3')) {
-    const headers = new Headers(COMMON_HEADERS)
-    headers.set('Location', `${ORIGINALS_URL}/${path.split('/').map(encodeURIComponent).join('/')}`)
-    headers.set('Cache-Control', 'public, max-age=3600')
-    return new Response(null, { status: 302, headers })
-  }
   return notFound(c)
 })

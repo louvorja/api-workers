@@ -4,7 +4,8 @@ Substituição da API PHP do LouvorJA. O Worker mantém os contratos HTTP usados
 pelos apps, o painel administra o catálogo no D1 e o R2 guarda a mídia e os
 arquivos que os apps leem.
 
-- API: `https://api.louvorja.workers.dev`
+- API: `https://api.louvorja.com.br` e `https://api.louvorja.workers.dev`
+  (mesmo catálogo e mesmos formatos de mídia)
 - Swagger UI: `/documentation`
 - OpenAPI: `/openapi.json`
 - Painel: `https://adm.louvorja.com.br`, no repositório
@@ -51,7 +52,7 @@ cliente; respostas iguais nos dois domínios também podem ficar na borda:
 | --- | --- |
 | `/json_db/*`, `/db/bible-bundle` | um dia |
 | `/db/*`, `/{lang}/*`, `/params`, `/onlinevideos` | uma hora |
-| `/file/*` | um ano (nome estável) |
+| `/file/*` | um ano (nome estável); redirecionamentos: uma hora |
 | `/auth/*`, `/admin/*`, `/tasks/*`, `/health`, erros | sem cache |
 
 O app acrescenta a data à URL de `/json_db` e um carimbo único quando o
@@ -66,7 +67,7 @@ dele ("Indy Library", erro 1010), e isso não é configurável. Por isso `/param
 sempre entrega com o domínio antigo os endereços desta API (`conn_ftp`,
 `coletaneas_online`, `version_log`).
 
-**Atualização por FTP (versões atuais do programa).** Workers não recebe
+**Atualização por FTP (versões anteriores do programa).** Workers não recebe
 conexões FTP. O Worker só faz o aperto de mão HTTPS: `/params` anuncia
 `conn_ftp` e `/ftp` devolve host, porta e credenciais de um servidor de FTP
 que existe à parte (o do servidor antigo), lidos do secret
@@ -75,22 +76,35 @@ parou na versão em que o PHP o deixou, e `db_version` em `/params` fica nesse
 número para essas instalações não tentarem atualizar a cada abertura. Sem o
 secret, `/params` não anuncia `conn_ftp` e `/ftp` responde `410`.
 
-**Atualização por HTTPS (a versão seguinte do programa).** Tudo que o FTP
-entregava está em `mp3.louvorja.com.br` (bucket `files-original`), e `/params`
-diz onde:
+**Atualização por HTTPS, com suporte a Opus.** Os arquivos públicos ficam em
+`files.louvorja.com.br` (bucket `files`), e `/params` diz onde:
 
 | Chave de `/params` | O que é |
 | --- | --- |
 | `https_db_version` | Versão do banco disponível por HTTPS. Compare com a do banco local |
 | `https_db_pt`, `https_db_es` | O banco SQLite de cada idioma (`config/<idioma>_database.db`) |
-| `https_files` | Base dos arquivos. Some `dir` + `/` + `name` da tabela `files` do banco |
+| `https_files` | Base dos arquivos. Some `dir` + `/` + `file_name` da tabela `files` do banco |
+| `https_system_files` | Base dos adicionais (`files.louvorja.com.br/system`). Some `ARQUIVOS_ADICIONAIS.URL`, trocando `\` por `/` |
 
-O banco é o mesmo que o PHP gerava: mesmas tabelas e visões, nomes de arquivo
-antigos (`.mp3`, `.bmp`) e o tamanho do arquivo original, que é o que o Delphi
-confere. `npm run delphi:db` o gera a partir do D1 quando a versão do catálogo
-passa de `https_db_version`, e só anuncia a versão depois de os dois bancos
-estarem no ar. A cópia dos últimos bancos gerados pelo PHP está em
-`backup/delphi-db-php-185/`.
+O banco preserva as tabelas e visões do PHP. O modo padrão `stored` usa o áudio
+realmente publicado (Opus ou MP3), mantém BMP nas imagens do Delphi e confere
+os tamanhos contra `files`. `npm run delphi:db` gera os bancos a partir do D1
+quando o catálogo passa de `https_db_version`, e só anuncia a versão depois de
+publicar ambos. O banco FTP e `db_version` permanecem independentes. As cópias
+anteriores em `files-original` são preservadas; `--audio=legacy` existe apenas
+para operações explícitas de compatibilidade e exige todos os originais no
+destino anunciado.
+
+Uma regeneração com `--force` pode manter o número da versão. Clientes HTTPS
+que já guardaram o banco anterior com esse número precisam baixá-lo novamente;
+a comparação de versão, sozinha, não invalida essa cópia local.
+
+Os adicionais não faziam parte da migração do catálogo. Foram recuperados do
+instalador oficial v26.11: executável, DLLs, fonte, ícone, áudios da Escola
+Sabatina e páginas em `system/config/server/`. `system/bassopus.dll` veio da
+`main` do Delphi com suporte a Opus. Isso não transforma o executável v26.11
+em uma nova compilação. Também é possível baixar um adicional por
+`/file/system/<caminho>`, que confirma sua existência e redireciona para `files`.
 
 **Versão nova do programa.** As chaves de versão e de instalador saem do
 último lançamento final de `louvorja/desktop` no GitHub (`npm run
@@ -141,9 +155,8 @@ por HTTP: `/auth`, `/admin`, `/tasks` e `/health` desse domínio também são
 os daqui. Quem ainda fala com aquela máquina é só o Delphi, por FTP, direto no
 IP.
 
-Quem pede `/file/musics/<faixa>.mp3` de uma faixa que virou Opus é
-redirecionado para o MP3 original em `mp3.louvorja.com.br`: quem ainda pede
-por esse nome é quem só toca MP3.
+Quem pede `/file/musics/<faixa>.mp3` recebe um redirecionamento para `files`
+somente quando esse MP3 existe lá. A API não entrega Opus com nome de MP3.
 
 ### Endereços de mídia do catálogo
 
@@ -153,31 +166,29 @@ completo, e ele aponta direto para o armazenamento: arquivo entregue por
 `/file` conta na cota diária de requisições do Worker. A troca é feita em
 `src/lib/media-urls.ts` e vale para `/json_db`, `/db`, o pacote `/db/bundle`
 e as listas/itens REST em `/pt` e `/es`, inclusive relações de álbuns e letras.
-O domínio do pedido decide a variante:
+O domínio do pedido não muda o formato:
 
 | Pedido por | Quem é | Áudio | Capas e imagens |
 | --- | --- | --- | --- |
-| `api.louvorja.workers.dev` | apps atuais | `files.louvorja.com.br`, com o nome exato do arquivo (Opus ou MP3) | `files.louvorja.com.br` |
-| `api.louvorja.com.br` | app web antigo e app Android | `mp3.louvorja.com.br`, sempre `.mp3` | `files.louvorja.com.br` |
+| ambos os domínios | todos os apps | `files.louvorja.com.br`, com o nome exato do arquivo (Opus ou MP3) | `files.louvorja.com.br` |
 
 - `files.louvorja.com.br` é o bucket `files`: a melhor versão de cada arquivo.
   Metade do acervo está em Opus; a outra metade ficou em MP3 porque o original
   é de 128 kbps e converter só acrescentaria perda.
-- `mp3.louvorja.com.br` é o bucket `files-original`: a cópia dos 5.996
-  arquivos originais da API antiga, com os mesmos nomes e pastas. Os clientes
-  antigos recebem só MP3 porque navegadores de iPhones mais velhos não tocam
-  Opus.
+- `mp3.louvorja.com.br` é o bucket `files-original`: backup dos arquivos
+  originais, com os mesmos nomes e pastas. É preservado, mas não é selecionado
+  pelas respostas atuais das APIs. Não se copia o MP3 para `files` quando
+  a versão desse áudio já é Opus.
 
-Como a resposta muda conforme o domínio e o cache do Worker tem uma chave só
-para todos eles, essas rotas saem com `Cache-Control: private`. A Bíblia não
-tem mídia, sai igual em todo domínio e continua no cache compartilhado.
-Nas listas REST, isso também preserva o domínio nos links de paginação:
-um cliente antigo não deve acabar em `workers.dev` ao abrir a próxima página.
+As listas REST mantêm `Cache-Control: private` porque os links de paginação
+preservam o domínio solicitado. O catálogo e os pacotes são iguais nos dois
+domínios; nesta migração, seus tempos e políticas de cache foram preservados.
 
 As URLs REST são conferidas contra as chaves reais do armazenamento durante
 a publicação. A lista `/files` tem um retrato adicional por idioma
-(`rest/{lang}_files_legacy.json`), com os tamanhos dos MP3 originais. Assim
-`size` corresponde ao arquivo indicado em `url` em ambos os domínios.
+(`rest/{lang}_files_legacy.json`), com os tamanhos dos MP3 originais, mantido
+como artefato de compatibilidade. As duas APIs usam o retrato atual, em que
+`size` corresponde ao arquivo indicado em `url`.
 Para corrigir só a mídia dos retratos existentes, sem publicar alterações do
 D1 nem mudar `db_version`: `npm run rest:media` simula;
 `npm run rest:media -- --write` grava e relê o resultado, preservando uma cópia
@@ -190,8 +201,9 @@ usam a extensão que existe no armazenamento e não dependem dessa troca.
 
 O pacote completo mantém `/db/bundle` e as variantes `meta/bundle-files.zip` e
 `meta/bundle-legacy.zip`; `meta/bundle.zip` é a base com caminhos relativos.
-`/db/catalog-bundle` entrega o catálogo sem capítulos, por domínio, a partir de
-`meta/catalog-bundle-files.zip` ou `meta/catalog-bundle-legacy.zip`.
+`/db/catalog-bundle` entrega o catálogo sem capítulos, em ambos os domínios,
+a partir de `meta/catalog-bundle-files.zip`. Os artefatos `legacy` continuam
+disponíveis no armazenamento, mas não são selecionados pelo domínio da API.
 `/db/bible-bundle` entrega somente capítulos.
 
 Todos os ZIPs incluem `_bundle_manifest.json` (`schema_version: 1`, `kind`:
@@ -201,7 +213,7 @@ antes de construir os pacotes. O cliente valida CRC e o conjunto exato de JSONs,
 mais tamanho/SHA-256 por arquivo. Os manifestos públicos mantêm o formato antigo
 com MD5, calculado sobre os bytes finais de cada domínio; `meta/manifest.json`
 representa a base interna, e `meta/manifest-files.json`/`meta/manifest-legacy.json`
-as respostas públicas.
+as variantes atual e legada; ambas as APIs selecionam a atual.
 
 `npm run bundle:variants -- --write` regenera todos esses artefatos a partir da
 base publicada, sem incrementar a versão do catálogo nem alterar os bancos FTP.
@@ -361,18 +373,18 @@ Bindings declarados em `wrangler.jsonc`:
 Os jobs usam `CLOUDFLARE_API_TOKEN`, credenciais S3 do R2 e, no job mensal,
 `YOUTUBE_API_KEY`. Segredos não entram em `wrangler.jsonc`, no R2 ou no Git.
 
-`PUBLIC_API_URL` é a origem gravada nas URLs dos snapshots e vale
-`https://api.louvorja.workers.dev`. O domínio `api.louvorja.com.br` pertence ao
-servidor antigo; só o use se ele passar a apontar para este Worker.
+`PUBLIC_API_URL` é a origem gravada nas URLs dos snapshots quando o script
+oferece essa configuração. O padrão é `https://api.louvorja.com.br`, atendido
+por este mesmo Worker.
 
 ## Segurança e compatibilidade HTTP
 
-- `/file/*` aceita somente `covers/`, `images/` e `musics/`, bloqueia subida de
-  diretório e responde `206` para `Range`.
+- `/file/*` aceita somente `covers/`, `images/`, `musics/` e `system/`, bloqueia
+  subida de diretório e responde `206` para `Range` nas mídias transmitidas.
 - Em `/file`, o nome `.bmp` continua resolvendo para a capa JPEG e o `.opus`
-  para o MP3 quando a faixa não foi convertida; o `.mp3` de uma faixa
-  convertida redireciona para o original. O `Content-Type` descreve os bytes
-  reais.
+  para o MP3 quando a faixa não foi convertida. MP3 e adicionais existentes
+  redirecionam para `files`; MP3 ausente responde `404`. O `Content-Type`
+  descreve os bytes reais.
 - Respostas privadas nunca vão para o cache, e um `404` público não fica preso
   na borda.
 - Entradas de rede e arquivos importados são validados antes do uso.

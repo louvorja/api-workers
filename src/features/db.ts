@@ -5,7 +5,6 @@ import {
   BUNDLE_VARIANT_KEYS,
   CATALOG_VARIANT_KEYS,
   MANIFEST_VARIANT_KEYS,
-  mediaVariantFor,
   withMediaUrls,
 } from '../lib/media-urls.ts'
 import { serveObject } from '../lib/r2.ts'
@@ -23,8 +22,6 @@ const DEFAULT_PER_PAGE = 50
 const SNAPSHOT_CACHE = 'public, max-age=3600, stale-while-revalidate=86400'
 // A Bíblia é estática: o pacote só muda se alguém republicar os capítulos.
 const BIBLE_CACHE = 'public, max-age=86400, stale-while-revalidate=604800'
-// O que carrega endereço de mídia sai diferente em cada domínio, e o cache do
-// Worker tem uma chave só para todos eles: só quem pediu pode guardar.
 const CATALOG_CACHE = 'private, max-age=3600'
 
 export const db = new Hono<App>()
@@ -32,7 +29,7 @@ export const db = new Hono<App>()
 db.on(['GET', 'HEAD'], '/db/manifest', async (c) => {
   const res = await serveObject(
     c.env.FILES,
-    MANIFEST_VARIANT_KEYS[mediaVariantFor(new URL(c.req.url).hostname)],
+    MANIFEST_VARIANT_KEYS.current,
     c.req.raw,
     CATALOG_CACHE,
   )
@@ -48,16 +45,15 @@ db.on(['GET', 'HEAD'], '/db/bible-bundle', async (c) => {
 
 // O pacote inicial não traz capítulos; /db/bundle continua sendo a restauração completa.
 db.on(['GET', 'HEAD'], '/db/catalog-bundle', async (c) => {
-  const key = CATALOG_VARIANT_KEYS[mediaVariantFor(new URL(c.req.url).hostname)]
+  const key = CATALOG_VARIANT_KEYS.current
   return (await serveObject(c.env.FILES, key, c.req.raw, CATALOG_CACHE)) ?? notFound(c)
 })
 
 // Precisa vir antes de /db/:key, senão o curinga tenta ler json_db/bundle.json.
-// Cada domínio recebe o pacote com os endereços de mídia dele já escritos. O
-// pacote sem endereços é a reserva enquanto a variante não foi publicada: os
+// O pacote sem endereços é a reserva enquanto a variante não foi publicada: os
 // apps completam o caminho com o endereço da API.
 db.on(['GET', 'HEAD'], '/db/bundle', async (c) => {
-  const variant = BUNDLE_VARIANT_KEYS[mediaVariantFor(new URL(c.req.url).hostname)]
+  const variant = BUNDLE_VARIANT_KEYS.current
   for (const key of [variant, BUNDLE_KEY]) {
     const res = await serveObject(c.env.FILES, key, c.req.raw, CATALOG_CACHE)
     if (res) return res
@@ -125,9 +121,7 @@ db.on(['GET', 'HEAD'], '/db/:key', async (c) => {
   // Capítulo bíblico não tem mídia e sai igual em todo domínio.
   const isBible = key.startsWith('bible_')
   const text = await object.text()
-  const data = JSON.parse(
-    isBible ? text : withMediaUrls(text, mediaVariantFor(new URL(c.req.url).hostname)),
-  ) as unknown
+  const data = JSON.parse(isBible ? text : withMediaUrls(text, 'current')) as unknown
   const perPage = Math.max(1, Number(c.req.query('per_page')) || DEFAULT_PER_PAGE)
   const page = Math.max(1, Number(c.req.query('page')) || 1)
 

@@ -24,7 +24,7 @@ describe('reconciliação de mídia REST', () => {
     )
   })
 
-  it('size acompanha o arquivo entregue em cada domínio, qualquer que seja a ordem das propriedades', () => {
+  it('size acompanha o arquivo em artefatos atuais e legados, qualquer que seja a ordem das propriedades', () => {
     const source = [
       { id_file: 1, size: 999, url: `${prefix}musics/pt/B.opus` },
       { id_file: 2, url: `${prefix}images/a.jpg`, size: 888 },

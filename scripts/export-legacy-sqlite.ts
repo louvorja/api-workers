@@ -8,8 +8,9 @@
  *     --export=replica.sql --out=legacy-db --audio=legacy
  *
  * `--audio=legacy` (padrão) mantém os nomes `.mp3` da API PHP. O modo
- * `--audio=stored` grava o `file_name` realmente armazenado para áudio e
- * imagens (`.opus`/`.mp3` e `.jpg`/`.bmp`).
+ * `--audio=stored` grava o `file_name` realmente armazenado para áudio
+ * (`.opus`/`.mp3`). Imagens e capas usam os BMP do Delphi tanto em files
+ * quanto nas views; nomes e tamanhos precisam descrever o mesmo download.
  * Gere cada modo em um `--out` diferente e publique-os em raízes FTP distintas
  * até que a versão mínima aceita do Delphi tenha suporte a Opus.
  *
@@ -232,6 +233,11 @@ export interface LegacyExportOptions {
    * e sem esta troca ele marcaria como danificado tudo que virou Opus.
    */
   originalFiles?: ReadonlyMap<string, number>
+  /**
+   * Tamanhos publicados por chave: dir/file_name para áudio, dir/name para
+   * imagens e capas. No modo stored, arquivos ausentes impedem a geração.
+   */
+  publishedFiles?: ReadonlyMap<string, number>
   /** Horas a somar aos carimbos do D1 (UTC) para chegar ao horário local que o PHP gravava. */
   timestampOffsetHours?: number
 }
@@ -317,6 +323,35 @@ function applyOriginalFiles(db: DatabaseSync, originals: ReadonlyMap<string, num
     else update.run(size, record.id_file as SQLInputValue)
   }
   return missing
+}
+
+function applyPublishedFiles(db: DatabaseSync, published: ReadonlyMap<string, number>) {
+  const files = db
+    .prepare(
+      "SELECT id_file, trim(dir, '/') || '/' || " +
+        "CASE WHEN type = 'music' THEN file_name ELSE name END AS key FROM files ORDER BY id_file",
+    )
+    .all() as Row[]
+  const update = db.prepare('UPDATE files SET size = ? WHERE id_file = ?')
+  const missing: string[] = []
+  for (const file of files) {
+    const key = String(file.key)
+    const size = published.get(key)
+    if (size === undefined) {
+      missing.push(key)
+    } else {
+      if (!Number.isSafeInteger(size) || size < 0) {
+        throw new Error(`tamanho publicado inválido para ${key}: ${String(size)}`)
+      }
+      update.run(size, file.id_file as SQLInputValue)
+    }
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `${missing.length} arquivo(s) do Delphi ausente(s) no armazenamento publicado: ` +
+        missing.slice(0, 20).join(', '),
+    )
+  }
 }
 
 /** O PHP gravava horário local; o D1 guarda UTC. */
@@ -959,6 +994,12 @@ export function exportLegacyDatabases(options: LegacyExportOptions): LegacyExpor
   const outDir = resolve(options.outDir ?? 'legacy-db')
   const languages = [...new Set((options.languages ?? ['pt', 'es']).map(validateLanguage))]
   const audio = validateAudioMode(options.audio)
+  if (
+    options.publishedFiles &&
+    (audio !== 'stored' || options.originalFiles || options.legacyFileSizes)
+  ) {
+    throw new Error('publishedFiles exige audio=stored e não pode combinar outros inventários')
+  }
   if (languages.length === 0) throw new Error('informe ao menos um idioma')
 
   mkdirSync(outDir, { recursive: true })
@@ -973,6 +1014,14 @@ export function exportLegacyDatabases(options: LegacyExportOptions): LegacyExpor
       assertRequiredSchema(base)
       if (options.legacyFileSizes) applyFileSizeOverrides(base, options.legacyFileSizes)
       if (options.originalFiles) missingOriginals = applyOriginalFiles(base, options.originalFiles)
+      if (options.publishedFiles) applyPublishedFiles(base, options.publishedFiles)
+      if (audio === 'stored') {
+        // O downloader HTTPS também pode ler files diretamente; ali o nome
+        // precisa descrever o mesmo BMP e tamanho que ARQUIVOS_SISTEMA usa.
+        base.exec(
+          "UPDATE files SET file_name = name WHERE type IN ('image_album', 'image_music', 'image', 'cover')",
+        )
+      }
       shiftTimestamps(base, options.timestampOffsetHours ?? 0)
       const sourceVersion = databaseVersion(base)
       version = options.versionOverride ?? sourceVersion

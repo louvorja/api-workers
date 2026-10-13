@@ -43,8 +43,6 @@ jobs:
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      # Originais (MP3, BMP) e bancos do Delphi: é o que o Delphi e os apps
-      # antigos baixam, em mp3.louvorja.com.br.
       R2_ORIGINALS_BUCKET: files-original
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       # Leitura dos lançamentos do Delphi, sem o limite de pedidos anônimos.

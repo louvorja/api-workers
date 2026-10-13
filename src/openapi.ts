@@ -121,8 +121,9 @@ export const openapi = {
       'camada REST a partir do D1.',
       '',
       '**Compatibilidade e correções deliberadas:**',
-      '- O áudio é servido em Opus e as capas em JPEG; URLs `.mp3` e `.bmp`',
-      '  continuam resolvendo no HTTP.',
+      '- Ambos os domínios da API retornam os mesmos arquivos e URLs de',
+      '  `files.louvorja.com.br`, preservando as extensões Opus e MP3 do catálogo.',
+      '- URLs `.mp3` entregam somente MP3; capas `.bmp` podem resolver para JPEG.',
       '- Requisições `Range` devolvem `206` de verdade. A origem ignora o header',
       '  e manda o arquivo inteiro.',
       '- O `404` não expõe o caminho do arquivo no servidor, e `/{lang}/config`',
@@ -235,10 +236,13 @@ export const openapi = {
     '/file/{path}': {
       get: {
         tags: ['Arquivos'],
-        summary: 'Servir mídia do acervo',
+        summary: 'Servir mídia e arquivos adicionais',
         description:
-          'Prefixos válidos: `covers/`, `images/` e `musics/`. Aceita `Range` e ' +
-          'devolve `206`. URLs `.mp3` e `.bmp` resolvem para `.opus` e `.jpg`.',
+          'Prefixos válidos: `covers/`, `images/`, `musics/` e `system/`. ' +
+          'Arquivos `system/` e músicas `.mp3` existentes redirecionam para ' +
+          '`https://files.louvorja.com.br/{path}` com cache de uma hora. ' +
+          'MP3 ausente retorna 404 mesmo quando existe Opus. As demais mídias ' +
+          'aceitam `Range` e devolvem `206`; capas `.bmp` resolvem para `.jpg`.',
         parameters: [
           {
             name: 'path',
@@ -251,6 +255,7 @@ export const openapi = {
         responses: {
           200: { description: 'Arquivo completo.' },
           206: { description: 'Trecho, em resposta a `Range`.' },
+          302: { description: 'Arquivo existente em files.louvorja.com.br.' },
           404: NOT_FOUND,
         },
       },

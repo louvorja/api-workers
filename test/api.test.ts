@@ -93,23 +93,71 @@ describe('file', () => {
   })
 
   // Quem pede .mp3 é quem só toca MP3: recebe o original, nunca o Opus.
-  it('manda ao armazenamento dos originais quem pede o .mp3 de uma faixa convertida', async () => {
+  it('redireciona MP3 existente para files e nunca troca um MP3 ausente por Opus', async () => {
+    const missing = await call('/file/musics/pt/A/B.mp3')
+    expect(missing.status).toBe(404)
+    expect(missing.headers.get('location')).toBeNull()
+    expect(missing.headers.get('cache-control')).toBe('no-store')
+
+    await env.FILES.put('musics/pt/A/B.mp3', new Uint8Array(150))
     const redirect = await call('/file/musics/pt/A/B.mp3')
     expect(redirect.status).toBe(302)
-    expect(redirect.headers.get('location')).toBe('https://mp3.louvorja.com.br/musics/pt/A/B.mp3')
+    expect(redirect.headers.get('location')).toBe('https://files.louvorja.com.br/musics/pt/A/B.mp3')
     expect(redirect.headers.get('access-control-allow-origin')).toBe('*')
 
+    await env.FILES.put('musics/pt/Hinário/Santo, Santo.mp3', new Uint8Array(80))
     const accented = await call(
       `/file/musics/pt/${encodeURIComponent('Hinário')}/Santo%2C%20Santo.mp3`,
     )
     expect(accented.headers.get('location')).toBe(
-      'https://mp3.louvorja.com.br/musics/pt/Hin%C3%A1rio/Santo%2C%20Santo.mp3',
+      'https://files.louvorja.com.br/musics/pt/Hin%C3%A1rio/Santo%2C%20Santo.mp3',
     )
 
     const kept = await call('/file/musics/pt/A/So%20Mp3.mp3')
-    expect(kept.status).toBe(200)
-    expect(kept.headers.get('content-type')).toBe('audio/mpeg')
+    expect(kept.status).toBe(302)
+    expect(kept.headers.get('location')).toBe(
+      'https://files.louvorja.com.br/musics/pt/A/So%20Mp3.mp3',
+    )
+    expect((await call('/file/musics/pt/nao-existe.mp3')).status).toBe(404)
     expect((await call('/file/covers/nao-existe.jpg')).status).toBe(404)
+  })
+
+  it('redireciona adicionais existentes em GET e HEAD com cache de uma hora', async () => {
+    for (const key of [
+      'bass.dll',
+      'config/fontes/din-condensed-bold.ttf',
+      'config/server/index.html',
+    ]) {
+      await env.FILES.put(`system/${key}`, new Uint8Array(5))
+      for (const method of ['GET', 'HEAD']) {
+        const response = await call(`/file/system/${key}`, { method })
+        expect(response.status).toBe(302)
+        expect(response.headers.get('location')).toBe(`https://files.louvorja.com.br/system/${key}`)
+        expect(response.headers.get('cache-control')).toBe('public, max-age=3600')
+        expect(response.headers.get('access-control-allow-origin')).toBe('*')
+        expect((await response.arrayBuffer()).byteLength).toBe(0)
+      }
+    }
+    const missing = await call('/file/system/nao-existe.dll')
+    expect(missing.status).toBe(404)
+    expect(missing.headers.get('location')).toBeNull()
+    expect(missing.headers.get('cache-control')).toBe('no-store')
+  })
+
+  it('barra caminhos inválidos de adicionais antes de criar um redirect', async () => {
+    for (const path of [
+      'system/%2e%2e%2fmeta/params.json',
+      'system/config/%2e%2e%5c%2e%2e%5cmeta/params.json',
+      'system//bass.dll',
+      'system/config/%00bass.dll',
+      'system/config/%0abass.dll',
+      'system/%zz',
+      'system/',
+    ]) {
+      const response = await call(`/file/${path}`)
+      expect(response.status).toBe(404)
+      expect(response.headers.get('location')).toBeNull()
+    }
   })
 
   it('entrega o .opus do acervo pelo nome exato', async () => {
@@ -310,7 +358,6 @@ describe('REST', () => {
   // gratuito. Só o que depende de quem pede ou do instante fica sem cache.
   it('deixa o catálogo em cache no cliente e na borda', async () => {
     const cacheOf = async (path: string) => (await call(path)).headers.get('cache-control')
-    // O catálogo de /json_db muda conforme o domínio: só o cliente guarda.
     expect(await cacheOf('/json_db/music_1')).toBe('private, max-age=86400')
     // A versão do banco é a exceção: quem pergunta "há banco novo?" não pode
     // receber a resposta de ontem, com ou sem a data na URL.
@@ -319,7 +366,6 @@ describe('REST', () => {
     expect(await cacheOf('/db/bible-bundle')).toBe(
       'public, max-age=86400, stale-while-revalidate=604800',
     )
-    // Mesmo motivo de /json_db: a tabela leva endereços que mudam conforme o domínio.
     expect(await cacheOf('/db/config')).toBe('private, max-age=3600')
     expect(await cacheOf('/pt/config')).toBe('public, max-age=3600, stale-while-revalidate=86400')
     expect(await cacheOf('/onlinevideos')).toBe(
@@ -338,18 +384,17 @@ describe('REST', () => {
   })
 })
 
-describe('catálogo menor e manifestos por domínio', () => {
-  it('preserva a rota completa e entrega catálogo/manifesto correspondente ao domínio', async () => {
-    for (const [host, variant] of [
-      ['api.test', 'files'],
-      ['api.louvorja.com.br', 'legacy'],
-    ]) {
+describe('catálogo menor e manifestos compartilhados pelos domínios', () => {
+  it('entrega os mesmos artefatos atuais mesmo quando existem artefatos legados', async () => {
+    for (const variant of ['files', 'legacy']) {
       await env.FILES.put(`meta/catalog-bundle-${variant}.zip`, `catalog-${variant}`)
       await env.FILES.put(`meta/bundle-${variant}.zip`, `full-${variant}`)
       await env.FILES.put(`meta/manifest-${variant}.json`, JSON.stringify([{ hash: variant }]))
+    }
+    for (const host of ['api.louvorja.workers.dev', 'api.louvorja.com.br']) {
       for (const [path, expected] of [
-        ['/db/catalog-bundle', `catalog-${variant}`],
-        ['/db/bundle', `full-${variant}`],
+        ['/db/catalog-bundle', 'catalog-files'],
+        ['/db/bundle', 'full-files'],
       ]) {
         const response = await worker.fetch(
           new Request(`https://${host}${path}`),
@@ -364,7 +409,7 @@ describe('catálogo menor e manifestos por domínio', () => {
           env,
           createExecutionContext(),
         )
-        expect(await response.json()).toEqual([{ hash: variant }])
+        expect(await response.json()).toEqual([{ hash: 'files' }])
         expect(response.headers.get('cache-control')).toMatch(/^private/)
       }
     }

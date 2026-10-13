@@ -6,26 +6,15 @@
  * arquivo entregue pela API conta na cota diária de requisições do Worker.
  */
 
-/** Domínio da API antiga. Quem chega por ele é cliente antigo. */
-export const LEGACY_HOST = 'api.louvorja.com.br'
-
-/** Bucket `files`: a melhor versão de cada arquivo (Opus ou MP3, JPEG). */
 export const FILES_URL = 'https://files.louvorja.com.br'
 
-/** Bucket `files-original`: os MP3 originais de todo o acervo. */
 export const ORIGINALS_URL = 'https://mp3.louvorja.com.br'
 
 /**
- * Capas e imagens saem sempre de `FILES_URL`. Só o áudio muda:
- *
- * - `current`: apps atuais. O arquivo guardado, com o nome exato (Opus ou MP3).
- * - `legacy`: app web antigo e app Android. Sempre `.mp3`, do armazenamento
- *   dos originais, porque navegadores de iPhones mais velhos não tocam Opus.
+ * `current` preserva a extensão publicada em FILES_URL.
+ * `legacy` troca áudios Opus por MP3 em ORIGINALS_URL.
  */
 export type MediaVariant = 'current' | 'legacy'
-
-export const mediaVariantFor = (hostname: string): MediaVariant =>
-  hostname === LEGACY_HOST ? 'legacy' : 'current'
 
 /** Pacote do catálogo com os endereços de cada variante já escritos. */
 export const BUNDLE_KEY = 'meta/bundle.zip'

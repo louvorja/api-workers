@@ -41,14 +41,6 @@ const forCurrent = {
   ],
 }
 
-// Apps antigos: só o áudio muda. Sai sempre em .mp3, do armazenamento dos
-// originais. Nada de mídia passa pela API.
-const forLegacy = {
-  ...forCurrent,
-  url_music: 'https://mp3.louvorja.com.br/musics/pt/Hinário/Santo, Santo.mp3',
-  url_instrumental_music: 'https://mp3.louvorja.com.br/musics/pt/Hinário/Santo, Santo - PB.mp3',
-}
-
 beforeAll(async () => {
   await env.FILES.put('json_db/music_7.json', JSON.stringify(music))
   await env.FILES.put('json_db/album_3.json', JSON.stringify([music, { ...music, id_music: 8 }]))
@@ -66,22 +58,20 @@ describe('endereços de mídia em /json_db', () => {
     expect(await response.json()).toEqual(forCurrent)
   })
 
-  it('manda os apps antigos ao armazenamento dos MP3 originais', async () => {
+  it('preserva as mesmas URLs e extensões quando a chamada vem do domínio antigo', async () => {
     const response = await get(`${LEGACY}/json_db/music_7?20261011`)
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual(forLegacy)
+    expect(await response.json()).toEqual(forCurrent)
   })
 
-  // O cache do Worker tem uma chave só para os dois domínios (caminho e query).
-  // Resposta que muda conforme o domínio não pode entrar nele.
-  it('mantém fora do cache compartilhado o que sai diferente em cada domínio', async () => {
+  it('preserva o cache do catálogo no cliente em ambos os domínios', async () => {
     for (const origin of [LEGACY, CURRENT]) {
       const response = await get(`${origin}/json_db/music_7?20261011`)
       expect(response.headers.get('cache-control')).toBe('private, max-age=86400')
     }
   })
 
-  it('deixa no cache compartilhado só a Bíblia, que sai igual nos dois domínios', async () => {
+  it('mantém a Bíblia no cache compartilhado dos dois domínios', async () => {
     const path = '/json_db/bible_1_1_1?20261011'
     const legacy = await get(`${LEGACY}${path}`)
     const current = await get(`${CURRENT}${path}`)
@@ -105,7 +95,7 @@ describe('endereços de mídia em /json_db', () => {
 })
 
 describe('endereços de mídia em /db', () => {
-  it('devolve a tabela com os endereços do domínio de quem pediu', async () => {
+  it('devolve a mesma tabela e URLs nos dois domínios preservando a paginação', async () => {
     const current = await get(`${CURRENT}/db/album_3`)
     expect(current.headers.get('cache-control')).toBe('private, max-age=3600')
     expect(await current.json()).toEqual({
@@ -116,7 +106,7 @@ describe('endereços de mídia em /db', () => {
     const legacy = await get(`${LEGACY}/db/album_3?per_page=1&page=2`)
     expect(legacy.headers.get('cache-control')).toBe('private, max-age=3600')
     expect(await legacy.json()).toEqual({
-      data: [{ ...forLegacy, id_music: 8 }],
+      data: [{ ...forCurrent, id_music: 8 }],
       meta: { total: 2, per_page: 1, current_page: 2, last_page: 2 },
     })
   })
@@ -144,12 +134,12 @@ describe('pacote do catálogo', () => {
     }
   })
 
-  it('entrega a cada domínio o pacote com os endereços dele', async () => {
+  it('entrega o mesmo pacote atual aos dois domínios', async () => {
     await env.FILES.put('meta/bundle.zip', 'pacote-sem-enderecos')
     await env.FILES.put('meta/bundle-files.zip', 'pacote-dos-apps-atuais')
     await env.FILES.put('meta/bundle-legacy.zip', 'pacote-dos-apps-antigos')
     expect(await (await get(`${CURRENT}/db/bundle`)).text()).toBe('pacote-dos-apps-atuais')
-    expect(await (await get(`${LEGACY}/db/bundle`)).text()).toBe('pacote-dos-apps-antigos')
+    expect(await (await get(`${LEGACY}/db/bundle`)).text()).toBe('pacote-dos-apps-atuais')
   })
 })
 
@@ -192,7 +182,7 @@ describe('troca dos caminhos de mídia', () => {
 })
 
 describe('endereços de mídia nas rotas REST', () => {
-  it('serve a lista de arquivos com o tamanho da variante e preserva filtros', async () => {
+  it('serve a mesma lista com tamanhos atuais nos dois domínios e preserva filtros', async () => {
     const current = {
       id_file: 91,
       name: 'A.mp3',
@@ -204,7 +194,7 @@ describe('endereços de mídia nas rotas REST', () => {
     await env.FILES.put('rest/pt_files_legacy.json', JSON.stringify([legacy]))
     for (const [origin, row, url] of [
       [CURRENT, current, 'https://files.louvorja.com.br/musics/pt/A.opus'],
-      [LEGACY, legacy, 'https://mp3.louvorja.com.br/musics/pt/A.mp3'],
+      [LEGACY, current, 'https://files.louvorja.com.br/musics/pt/A.opus'],
     ] as const) {
       const response = await get(`${origin}/pt/files?id_file=91`)
       expect(response.headers.get('cache-control')).toBe('private, max-age=3600')
@@ -235,11 +225,11 @@ describe('endereços de mídia nas rotas REST', () => {
   })
 
   for (const [origin, expected] of [
-    [LEGACY, forLegacy],
+    [LEGACY, forCurrent],
     [CURRENT, forCurrent],
   ] as const) {
     for (const lang of ['pt', 'es']) {
-      it(`aplica a variante em listas, itens e relações de ${origin}/${lang}`, async () => {
+      it(`aplica as URLs atuais em listas, itens e relações de ${origin}/${lang}`, async () => {
         for (const path of [
           'musics',
           'hymnal',

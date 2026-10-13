@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { COMMON_HEADERS, notFound } from '../lib/http.ts'
-import { MANIFEST_VARIANT_KEYS, mediaVariantFor, withMediaUrls } from '../lib/media-urls.ts'
+import { MANIFEST_VARIANT_KEYS, withMediaUrls } from '../lib/media-urls.ts'
 import { serveObject } from '../lib/r2.ts'
 import type { App } from '../types.ts'
 
@@ -12,13 +12,6 @@ const KEY_RE = /^[a-zA-Z0-9_-]+$/
 // na cota diária do plano gratuito — resposta 304 também conta.
 const JSON_CACHE = 'public, max-age=86400, stale-while-revalidate=604800'
 
-/**
- * O cache do Worker não separa as respostas por domínio: a chave é só caminho e
- * query, e os dois apps pedem a mesma URL (`?AAAAMMDD`). O catálogo sai com
- * endereços de mídia diferentes em cada domínio (ver lib/media-urls.ts), então
- * `public` aqui entrega a um app a resposta montada para o outro. Fica só no
- * cache de quem pediu.
- */
 const CATALOG_CACHE = 'private, max-age=86400'
 
 /**
@@ -42,7 +35,7 @@ export const jsonDb = new Hono<App>()
 jsonDb.on(['GET', 'HEAD'], '/json_db', async (c) => {
   const res = await serveObject(
     c.env.FILES,
-    MANIFEST_VARIANT_KEYS[mediaVariantFor(new URL(c.req.url).hostname)],
+    MANIFEST_VARIANT_KEYS.current,
     c.req.raw,
     CATALOG_CACHE,
   )
@@ -53,8 +46,7 @@ jsonDb.on(['GET', 'HEAD'], '/json_db/:key', async (c) => {
   const key = c.req.param('key')
   if (!KEY_RE.test(key)) return notFound(c)
 
-  // Os capítulos da Bíblia não têm mídia: saem iguais nos dois domínios, sem
-  // reescrita, e por isso são os únicos que podem ficar no cache compartilhado.
+  // Os capítulos da Bíblia não têm mídia e podem sair sem reescrita.
   if (key.startsWith('bible_')) {
     const res = await serveObject(c.env.FILES, `json_db/${key}.json`, c.req.raw, JSON_CACHE)
     if (res) return res
@@ -67,6 +59,6 @@ jsonDb.on(['GET', 'HEAD'], '/json_db/:key', async (c) => {
   const headers = new Headers(COMMON_HEADERS)
   headers.set('Content-Type', 'application/json')
   headers.set('Cache-Control', key === 'config' ? VERSION_CACHE : CATALOG_CACHE)
-  const body = withMediaUrls(await object.text(), mediaVariantFor(new URL(c.req.url).hostname))
+  const body = withMediaUrls(await object.text(), 'current')
   return new Response(c.req.method === 'HEAD' ? null : body, { headers })
 })
