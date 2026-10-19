@@ -104,6 +104,15 @@ anteriores em `files-original` são preservadas; `--audio=legacy` existe apenas
 para operações explícitas de compatibilidade e exige todos os originais no
 destino anunciado.
 
+Somente no banco HTTPS (`stored`), `LISTA_MUSICAS` e `LISTA_MUSICAS_ONL` são
+tabelas com os campos de busca já calculados. Nomes, colunas e resultados são
+preservados; `LISTA_MUSICAS_TODAS` e `LISTA_MUSICAS_PERSO` continuam como views.
+Gatilhos atualizam as tabelas quando o Delphi altera os álbuns ignorados ou
+atualiza canais, playlists e vídeos. O exportador mantém as views por padrão;
+`delphi:db` habilita a materialização para o banco HTTPS. Para regenerar na
+mesma versão, use `--force`; clientes que já baixaram essa versão precisam
+baixar o banco novamente para receber a mudança.
+
 Esta atualização mantém a versão 185. Clientes HTTPS que já guardaram um
 banco 185 sem `ARQUIVOS_SISTEMA.URL_DOWNLOAD` devem detectar a coluna ausente
 e baixar novamente o banco uma vez; comparar apenas a versão não detecta

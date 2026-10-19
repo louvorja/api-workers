@@ -40,7 +40,7 @@ if (AUDIO !== 'legacy' && AUDIO !== 'stored')
 const REPORT_FILE = 'delphi-db-report.json'
 /** O PHP gravava os carimbos no horário de Brasília; o D1 guarda UTC. */
 const TIMESTAMP_OFFSET_HOURS = -3
-/** Visões que o Delphi consulta: não podem encolher de uma versão para a outra sem motivo. */
+/** Consultas do Delphi que não podem encolher de uma versão para a outra sem motivo. */
 const GUARDED_VIEWS = ['MUSICAS', 'LISTA_MUSICAS', 'ALBUM', 'BIBLIA', 'ARQUIVOS_SISTEMA'] as const
 
 function count(path: string, object: string): number {
@@ -127,6 +127,7 @@ try {
     outDir,
     bibleSource: previousDir,
     audio: AUDIO,
+    materializeMusicLists: AUDIO === 'stored',
     ...(AUDIO === 'stored' ? { publishedFiles } : { originalFiles: publishedFiles }),
     timestampOffsetHours: TIMESTAMP_OFFSET_HOURS,
     versionOverride: targetVersion,

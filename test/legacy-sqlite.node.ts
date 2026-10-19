@@ -9,6 +9,7 @@ import {
   LEGACY_TABLES,
   LEGACY_VIEWS,
 } from '../scripts/export-legacy-sqlite.ts'
+import { MATERIALIZED_MUSIC_LISTS } from '../scripts/lib/delphi-search.ts'
 
 type Row = Record<string, unknown>
 
@@ -345,6 +346,89 @@ test('modo stored usa áudio físico e preserva imagens BMP', (context) => {
     { ...db.prepare('SELECT file_name, size FROM files WHERE id_file = 4').get() },
     { file_name: 'fundo-pt.bmp', size: 9_003 },
   )
+})
+
+test('listas materializadas preservam os dados e as alterações locais do Delphi nos dois idiomas', (context) => {
+  const root = mkdtempSync(join(tmpdir(), 'louvorja-search-tables-'))
+  context.after(() => rmSync(root, { recursive: true, force: true }))
+  const exportSql = join(root, 'replica.sql')
+  const sql = `${fixtureSql()}
+    INSERT INTO categories (id_category, name, slug, "order", type, id_language)
+      VALUES (3, 'Diversas', 'misc', 2, 'album', 'pt');
+    INSERT INTO albums (id_album, name, id_file_image, color, id_language)
+      VALUES (3, 'Opcional', 1, '#112233', 'pt');
+    INSERT INTO categories_albums (id_category_album, id_category, id_album, name, "order", id_language)
+      VALUES (3, 3, 3, '', 2, 'pt');
+    INSERT INTO albums_musics (id_album_music, id_album, id_music, track, id_language)
+      VALUES (3, 3, 1, 2, 'pt');
+  `
+  writeFileSync(exportSql, sql)
+  const views = exportLegacyDatabases({ exportSql, outDir: join(root, 'views'), audio: 'stored' })
+  const tables = exportLegacyDatabases({
+    exportSql,
+    outDir: join(root, 'tables'),
+    audio: 'stored',
+    materializeMusicLists: true,
+  })
+
+  for (const [index, result] of tables.entries()) {
+    const source = new DatabaseSync(views[index]!.path)
+    const target = new DatabaseSync(result.path)
+    context.after(() => source.close())
+    context.after(() => target.close())
+    const lists = [...MATERIALIZED_MUSIC_LISTS, 'LISTA_MUSICAS_PERSO', 'LISTA_MUSICAS_TODAS']
+    const compare = () => {
+      for (const name of lists) {
+        const query = `SELECT * FROM ${name} ORDER BY ID, ID_ALBUM, NOME_ALBUM_COM, FAIXA, NOME`
+        assert.deepEqual(target.prepare(query).all(), source.prepare(query).all(), name)
+      }
+    }
+    for (const name of lists) {
+      assert.deepEqual(names(target, name), names(source, name), name)
+      const kind = (db: DatabaseSync) =>
+        db.prepare('SELECT type FROM sqlite_master WHERE name = ?').get(name)?.type
+      assert.equal(kind(source), 'view')
+      assert.equal(
+        kind(target),
+        MATERIALIZED_MUSIC_LISTS.some((list) => list === name) ? 'table' : 'view',
+      )
+    }
+    compare()
+    const mutate = (statement: string) => {
+      source.exec(statement)
+      target.exec(statement)
+      compare()
+    }
+    // O mesmo ID pode aparecer em vários álbuns; o hinário não pode ser desativado.
+    mutate('INSERT INTO _ALBUM_IGNORAR (ID) VALUES (3)')
+    mutate('UPDATE _ALBUM_IGNORAR SET ID = 1')
+    mutate('DELETE FROM _ALBUM_IGNORAR')
+    mutate(
+      "INSERT INTO _COLETANEAS_PERSONALIZADAS VALUES ('pessoal', 'Graça em casa', 'local.slja')",
+    )
+
+    // A API entrega DELETE/INSERT, inclusive por playlist; IDs de vídeo podem se repetir.
+    mutate("INSERT INTO ONL_PLAYLISTS VALUES ('extra', 'canal-pt', 'Extra', '', '')")
+    mutate("INSERT INTO ONL_VIDEOS VALUES ('video-pt', 'extra', 'Ação ao vivo', 2, '', '')")
+    mutate("INSERT INTO ONL_VIDEOS VALUES ('00123', 'extra', 'Graça', 3, '', '')")
+    mutate(
+      "UPDATE ONL_VIDEOS SET VIDEO_ID = 'novo', NOME = 'Renovação' WHERE PLAYLIST_ID = 'extra'",
+    )
+    mutate("UPDATE ONL_PLAYLISTS SET NOME = 'Louvor renovado' WHERE PLAYLIST_ID = 'extra'")
+    mutate("UPDATE ONL_CANAIS SET NOME = 'Canal bênção' WHERE CANAL_ID = 'canal-pt'")
+    mutate("UPDATE ONL_PLAYLISTS SET PLAYLIST_ID = 'mudou' WHERE PLAYLIST_ID = 'extra'")
+    mutate("UPDATE ONL_PLAYLISTS SET PLAYLIST_ID = 'extra' WHERE PLAYLIST_ID = 'mudou'")
+    mutate("DELETE FROM ONL_VIDEOS WHERE PLAYLIST_ID = 'extra'")
+    mutate("DELETE FROM ONL_PLAYLISTS WHERE CANAL_ID = 'canal-pt'")
+    mutate("INSERT INTO ONL_PLAYLISTS VALUES ('playlist-pt', 'canal-pt', 'Restaurada', '', '')")
+    mutate("UPDATE ONL_CANAIS SET CANAL_ID = 'outro' WHERE CANAL_ID = 'canal-pt'")
+    mutate("UPDATE ONL_CANAIS SET CANAL_ID = 'canal-pt' WHERE CANAL_ID = 'outro'")
+    mutate('DELETE FROM ONL_CANAIS')
+    mutate("INSERT INTO ONL_CANAIS VALUES ('canal-pt', 'Restaurado', '', '', '')")
+    assert.equal(target.prepare('PRAGMA integrity_check').get()?.integrity_check, 'ok')
+    assert.deepEqual(target.prepare('PRAGMA foreign_key_check').all(), [])
+  }
+  assert.equal(readFileSync(exportSql, 'utf8'), sql)
 })
 
 test('modo legacy grava no SQLite o tamanho real do MP3 materializado', (context) => {

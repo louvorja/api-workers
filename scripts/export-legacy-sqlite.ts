@@ -39,6 +39,7 @@ import {
 import { join, resolve } from 'node:path'
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 import { pathToFileURL } from 'node:url'
+import { materializeMusicLists } from './lib/delphi-search.ts'
 
 type Row = Record<string, unknown>
 
@@ -217,6 +218,8 @@ export interface LegacyExportOptions {
   languages?: readonly string[]
   bibleSource?: string
   audio?: LegacyAudioMode
+  /** Materializa as listas de busca apenas no banco distribuído por HTTPS. */
+  materializeMusicLists?: boolean
   /** Versão já calculada pela publicação atômica; não altera o export SQL. */
   versionOverride?: number
   /**
@@ -970,6 +973,7 @@ function buildLanguageDatabase(
   audio: LegacyAudioMode,
   missingOriginals: string[],
   publishedFiles?: ReadonlyMap<string, number>,
+  materializeSearch = false,
 ): LegacyExportResult {
   copyFileSync(basePath, stagedPath)
   const db = new DatabaseSync(stagedPath)
@@ -997,6 +1001,7 @@ function buildLanguageDatabase(
 
     dropD1OnlyObjects(db)
     createLegacyObjects(db, language, version, audio)
+    if (materializeSearch) materializeMusicLists(db)
     validateDownloads(db, publishedFiles)
     const unknown = (
       db
@@ -1120,6 +1125,7 @@ export function exportLegacyDatabases(options: LegacyExportOptions): LegacyExpor
           audio,
           missingOriginals,
           options.publishedFiles,
+          options.materializeMusicLists,
         ),
         stagedPath,
       })
@@ -1148,6 +1154,7 @@ function cli() {
       'Uso: node --experimental-strip-types scripts/export-legacy-sqlite.ts ' +
         '--export=replica.sql [--out=legacy-db] [--languages=pt,es] ' +
         '[--audio=legacy|stored] [--version=187] ' +
+        '[--materialize-music-lists] ' +
         '[--bible-source=/backup/db_{lang}_186.db]\n' +
         'Use raízes FTP distintas para legacy e stored até exigir Delphi com suporte a Opus.',
     )
@@ -1162,6 +1169,7 @@ function cli() {
     languages: args.get('languages')?.split(',').filter(Boolean),
     bibleSource: args.get('bible-source') || undefined,
     audio: validateAudioMode(args.get('audio')),
+    materializeMusicLists: args.has('materialize-music-lists'),
     versionOverride: args.has('version') ? Number(args.get('version')) : undefined,
   })
 
