@@ -109,9 +109,14 @@ tabelas com os campos de busca já calculados. Nomes, colunas e resultados são
 preservados; `LISTA_MUSICAS_TODAS` e `LISTA_MUSICAS_PERSO` continuam como views.
 Gatilhos atualizam as tabelas quando o Delphi altera os álbuns ignorados ou
 atualiza canais, playlists e vídeos. O exportador mantém as views por padrão;
-`delphi:db` habilita a materialização para o banco HTTPS. Para regenerar na
-mesma versão, use `--force`; clientes que já baixaram essa versão precisam
-baixar o banco novamente para receber a mudança.
+`delphi:db` habilita a materialização para o banco HTTPS. As tabelas são criadas
+com tipos explícitos: nomes e outros campos de exibição usam `NVARCHAR(n)`,
+que o FireDAC reconhece como string; letras usam `TEXT` (memo), e IDs de vídeos
+permanecem textuais. O tamanho declarado acomoda os valores exportados.
+O gerador também tipa `musics.name` no SQLite exportado para que `MUSICAS.NOME`,
+usado pela tela de álbuns, seja string. O esquema do D1 permanece igual.
+Para regenerar na mesma versão, use `--force`; clientes que já baixaram essa
+versão precisam baixar o banco novamente para receber a mudança.
 
 Esta atualização mantém a versão 185. Clientes HTTPS que já guardaram um
 banco 185 sem `ARQUIVOS_SISTEMA.URL_DOWNLOAD` devem detectar a coluna ausente

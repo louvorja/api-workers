@@ -2,6 +2,33 @@ import type { DatabaseSync } from 'node:sqlite'
 
 export const MATERIALIZED_MUSIC_LISTS = ['LISTA_MUSICAS', 'LISTA_MUSICAS_ONL'] as const
 
+// FireDAC lê TEXT como WideMemo. Campos exibidos precisam de NVARCHAR;
+// somente as letras (conteúdo longo) continuam como memo. Os números abaixo
+// são tamanhos mínimos, ampliados se o catálogo contiver valores maiores.
+const MUSIC_LIST_COLUMNS = {
+  ID_ALBUM: 'INTEGER',
+  NOME_ALBUM: 512,
+  NOME_ALBUM_COM: 1024,
+  FAIXA: 'INTEGER',
+  NOME: 512,
+  NOME_COM: 1024,
+  TIPO_HASD: 1,
+  TIPO_JA: 1,
+  TIPO_BAIXADA: 1,
+  TIPO_WEB: 1,
+  TIPO_PERSO: 1,
+  TIPO: 1,
+  URL_ALBUM: 512,
+  ALBUM: 512,
+  URL: 1024,
+  URL_INSTRUMENTAL: 1024,
+  IDIOMA: 16,
+  LETRA: 'TEXT',
+  NOME_SEMAC: 512,
+  LETRA_SEMAC: 'TEXT',
+  NOME_ALBUM_COM_SEMAC: 1024,
+} as const
+
 /**
  * Calcula os campos de busca uma vez, só no SQLite distribuído por HTTPS.
  * Os gatilhos preservam as alterações locais que antes apareciam nas views:
@@ -16,7 +43,42 @@ export function materializeMusicLists(db: DatabaseSync) {
     if (!view) throw new Error(`view ${name} ausente ao materializar a busca do Delphi`)
     const select = view.sql.replace(/^CREATE VIEW\s+\S+\s+AS\s+/i, '')
     selects.set(name, select)
-    db.exec(`DROP VIEW ${name}; CREATE TABLE ${name} AS ${select};`)
+    const columns = Object.entries({
+      // IDs de vídeo são strings: "00123" não pode virar o número 123.
+      ID: name === 'LISTA_MUSICAS' ? 'INTEGER' : 128,
+      ...MUSIC_LIST_COLUMNS,
+    })
+    const sourceColumns = db
+      .prepare(`PRAGMA table_info(${name})`)
+      .all()
+      .map((field) => field.name)
+    if (sourceColumns.join(',') !== columns.map(([column]) => column).join(',')) {
+      throw new Error(`colunas de ${name} divergiram do contrato tipado do Delphi`)
+    }
+    // Bytes UTF-8 também cobrem o tamanho em UTF-16 usado pelo Delphi, inclusive emoji.
+    const sizes = db
+      .prepare(
+        `SELECT ${columns
+          .filter(([, type]) => typeof type === 'number')
+          .map(([column]) => `max(length(CAST(${column} AS BLOB))) AS ${column}`)
+          .join(', ')} FROM ${name}`,
+      )
+      .get()!
+    const schema = columns
+      .map(
+        ([column, type]) =>
+          `${column} ${
+            typeof type === 'number'
+              ? `NVARCHAR(${Math.max(type, Number(sizes[column] ?? 0))})`
+              : type
+          }`,
+      )
+      .join(', ')
+    db.exec(`
+      DROP VIEW ${name};
+      CREATE TABLE ${name} (${schema});
+      INSERT INTO ${name} ${select};
+    `)
   }
 
   db.exec(`

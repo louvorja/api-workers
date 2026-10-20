@@ -469,6 +469,44 @@ function dropD1OnlyObjects(db: DatabaseSync) {
   }
 }
 
+/** Preserva MUSICAS como view, mas fornece ao FireDAC um nome de tipo string na origem. */
+function typeMusicName(db: DatabaseSync) {
+  const original = String(
+    row(db, "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'musics'")?.sql ?? '',
+  )
+  // O comprimento em bytes cobre também strings Unicode no buffer UTF-16 do Classic.
+  const size = Math.max(
+    512,
+    Number(row(db, 'SELECT max(length(CAST(name AS BLOB))) AS size FROM musics')?.size ?? 0),
+  )
+  const typed = original.replace(
+    /([,(]\s*(?:"name"|`name`|\[name\]|name)\s+)TEXT\b/i,
+    `$1NVARCHAR(${size})`,
+  )
+  if (typed === original) throw new Error('musics.name não corresponde ao schema TEXT do D1')
+
+  const indexes = db
+    .prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'musics' AND sql IS NOT NULL",
+    )
+    .all()
+  const sequence = row(db, "SELECT seq FROM sqlite_sequence WHERE name = 'musics'")?.seq ?? 0
+  // Só no banco temporário da exportação, com FKs desligadas e dentro da transação.
+  // Reusa o DDL para preservar colunas, constraints e AUTOINCREMENT; não renomeia
+  // a tabela original, pois isso reescreveria as referências de outras tabelas.
+  db.exec(`
+    CREATE TEMP TABLE delphi_music_names AS SELECT * FROM musics;
+    DROP TABLE musics;
+    ${typed};
+    INSERT INTO musics SELECT * FROM temp.delphi_music_names;
+    DROP TABLE temp.delphi_music_names;
+  `)
+  for (const index of indexes) db.exec(String(index.sql))
+  db.prepare("UPDATE sqlite_sequence SET seq = max(seq, ?) WHERE name = 'musics'").run(
+    sequence as SQLInputValue,
+  )
+}
+
 function keepLanguage(db: DatabaseSync, language: string) {
   for (const table of LANGUAGE_TABLES) {
     db.prepare(`DELETE FROM ${quoteIdentifier(table)} WHERE id_language <> ?`).run(language)
@@ -999,6 +1037,7 @@ function buildLanguageDatabase(
     }
 
     dropD1OnlyObjects(db)
+    typeMusicName(db)
     createLegacyObjects(db, language, version, audio)
     if (materializeSearch) materializeMusicLists(db)
     validateDownloads(db, publishedFiles)

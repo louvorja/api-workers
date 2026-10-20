@@ -122,6 +122,31 @@ function names(db: DatabaseSync, object: string): string[] {
     .map((record) => String((record as Row).name))
 }
 
+function assertClassicListTypes(db: DatabaseSync) {
+  for (const name of MATERIALIZED_MUSIC_LISTS) {
+    const fields = db.prepare(`PRAGMA table_info(${name})`).all()
+    assert.equal(fields.length, 22)
+    for (const field of fields) {
+      assert.ok(field.type, `${name}.${field.name} precisa de tipo declarado`)
+      if (['ID', 'ID_ALBUM', 'FAIXA', 'LETRA', 'LETRA_SEMAC'].includes(String(field.name))) continue
+      assert.match(String(field.type), /^NVARCHAR\(\d+\)$/, `${name}.${field.name}`)
+    }
+    const metadata = new Map(
+      db
+        .prepare(`SELECT * FROM ${name} WHERE 0`)
+        .columns()
+        .map((field) => [field.name, field.type]),
+    )
+    assert.match(metadata.get('NOME') ?? '', /^NVARCHAR\(\d+\)$/)
+    assert.equal(metadata.get('ID_ALBUM'), 'INTEGER')
+    assert.equal(metadata.get('FAIXA'), 'INTEGER')
+    assert.equal(metadata.get('LETRA'), 'TEXT')
+    assert.equal(metadata.get('LETRA_SEMAC'), 'TEXT')
+    if (name === 'LISTA_MUSICAS') assert.equal(metadata.get('ID'), 'INTEGER')
+    else assert.match(metadata.get('ID') ?? '', /^NVARCHAR\(\d+\)$/)
+  }
+}
+
 test('gera os objetos Delphi, os campos essenciais e um banco por idioma', (context) => {
   const root = mkdtempSync(join(tmpdir(), 'louvorja-legacy-'))
   context.after(() => rmSync(root, { recursive: true, force: true }))
@@ -393,6 +418,7 @@ test('listas materializadas preservam os dados e as alterações locais do Delph
         MATERIALIZED_MUSIC_LISTS.some((list) => list === name) ? 'table' : 'view',
       )
     }
+    assertClassicListTypes(target)
     compare()
     const mutate = (statement: string) => {
       source.exec(statement)
@@ -429,6 +455,122 @@ test('listas materializadas preservam os dados e as alterações locais do Delph
     assert.deepEqual(target.prepare('PRAGMA foreign_key_check').all(), [])
   }
   assert.equal(readFileSync(exportSql, 'utf8'), sql)
+})
+
+test('nomes têm metadados de string para o Classic, preservando Unicode, nulos e o schema de origem', (context) => {
+  const root = mkdtempSync(join(tmpdir(), 'louvorja-classic-types-'))
+  context.after(() => rmSync(root, { recursive: true, force: true }))
+  const exportSql = join(root, 'replica.sql')
+  const title = 'Canção 🎵 — Acción '.repeat(100)
+  // D1 exporta identificadores entre aspas; o nome pode ser maior que o padrão do driver.
+  const sql = `${fixtureSql().replace('  name                       TEXT,', '  "name"                     TEXT,')}
+    UPDATE musics SET name = '${title}';
+    INSERT INTO musics (id_music, name, id_language) VALUES (100, NULL, 'pt');
+    DELETE FROM musics WHERE id_music = 100;
+    INSERT INTO musics (id_music, name, id_language) VALUES (3, NULL, 'pt');
+    INSERT INTO albums_musics (id_album_music, id_album, id_music, track, id_language)
+      VALUES (3, 1, 3, 2, 'pt');
+    CREATE INDEX music_name_lookup ON musics ("name");
+  `
+  writeFileSync(exportSql, sql)
+  const original = new DatabaseSync(':memory:')
+  context.after(() => original.close())
+  original.exec(sql)
+  for (const audio of ['legacy', 'stored'] as const) {
+    const results = exportLegacyDatabases({
+      exportSql,
+      outDir: join(root, audio),
+      audio,
+      materializeMusicLists: audio === 'stored',
+    })
+    for (const result of results) {
+      const db = new DatabaseSync(result.path)
+      context.after(() => db.close())
+      assert.deepEqual(
+        db.prepare('SELECT * FROM musics ORDER BY id_music').all(),
+        original
+          .prepare('SELECT * FROM musics WHERE id_language = ? ORDER BY id_music')
+          .all(result.language),
+      )
+      assert.deepEqual(
+        db.prepare('PRAGMA foreign_key_list(musics)').all(),
+        original.prepare('PRAGMA foreign_key_list(musics)').all(),
+      )
+      assert.deepEqual(
+        db.prepare('PRAGMA index_list(musics)').all(),
+        original.prepare('PRAGMA index_list(musics)').all(),
+      )
+      // Mesmo caminho da tela de álbum: o driver precisa do tipo declarado, não só typeof(valor).
+      const albumQuery = db.prepare(`
+        SELECT DISTINCT M.NOME AS NOME FROM MUSICAS M
+        LEFT JOIN ALBUM_MUSICAS A ON A.ID_MUSICA = M.ID WHERE ID_ALBUM = ?
+      `)
+      const type = albumQuery.columns()[0]?.type ?? ''
+      assert.match(type, /^NVARCHAR\(\d+\)$/)
+      assert.ok(Number(type.match(/\d+/)?.[0]) >= title.length)
+      assert.equal(
+        db.prepare('SELECT NOME FROM MUSICAS WHERE ID = ?').get(result.language === 'pt' ? 1 : 2)
+          ?.NOME,
+        title,
+      )
+      if (result.language === 'pt') {
+        assert.equal(db.prepare('SELECT NOME FROM MUSICAS WHERE ID = 3').get()?.NOME, null)
+      }
+      assert.equal(
+        db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'musics'").get()?.seq,
+        100,
+      )
+      assert.equal(
+        db.prepare("SELECT type FROM sqlite_master WHERE name = 'MUSICAS'").get()?.type,
+        'view',
+      )
+      if (audio === 'stored') {
+        assertClassicListTypes(db)
+        const name = db.prepare('SELECT NOME FROM LISTA_MUSICAS WHERE ID = ?')
+        const value = name.get(result.language === 'pt' ? 1 : 2)?.NOME
+        assert.ok(typeof value === 'string' && value.startsWith(title))
+        assert.ok(Number(name.columns()[0]?.type?.match(/\d+/)?.[0]) >= value.length)
+      }
+      assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
+      assert.equal(db.prepare('PRAGMA integrity_check').get()?.integrity_check, 'ok')
+    }
+  }
+  assert.equal(
+    original.prepare("SELECT type FROM pragma_table_info('musics') WHERE name = 'name'").get()
+      ?.type,
+    'TEXT',
+  )
+  assert.equal(readFileSync(exportSql, 'utf8'), sql)
+})
+
+test('listas vazias também declaram os tipos para o Classic', (context) => {
+  const root = mkdtempSync(join(tmpdir(), 'louvorja-classic-empty-'))
+  context.after(() => rmSync(root, { recursive: true, force: true }))
+  const exportSql = join(root, 'replica.sql')
+  writeFileSync(
+    exportSql,
+    `${fixtureSql()}
+    DELETE FROM lyrics; DELETE FROM albums_musics; DELETE FROM musics; DELETE FROM online_videos;
+  `,
+  )
+  const results = exportLegacyDatabases({
+    exportSql,
+    outDir: join(root, 'out'),
+    audio: 'stored',
+    materializeMusicLists: true,
+  })
+  for (const result of results) {
+    const db = new DatabaseSync(result.path, { readOnly: true })
+    context.after(() => db.close())
+    assertClassicListTypes(db)
+    for (const name of MATERIALIZED_MUSIC_LISTS) {
+      assert.equal(db.prepare(`SELECT count(*) total FROM ${name}`).get()?.total, 0)
+    }
+    assert.match(
+      db.prepare('SELECT NOME FROM MUSICAS').columns()[0]?.type ?? '',
+      /^NVARCHAR\(\d+\)$/,
+    )
+  }
 })
 
 test('modo legacy grava no SQLite o tamanho real do MP3 materializado', (context) => {
