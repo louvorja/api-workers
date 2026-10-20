@@ -600,7 +600,6 @@ function createLegacyObjects(
       UNION ALL SELECT '6', 'bass.dll', 'bass.dll'
       UNION ALL SELECT '7', 'borlndmm.dll', 'borlndmm.dll'
       UNION ALL SELECT '8', 'midas.dll', 'midas.dll'
-      UNION ALL SELECT '10', 'LouvorJA.exe', 'LouvorJA.exe'
       UNION ALL SELECT '11', 'ssleay32.dll', 'ssleay32.dll'
       UNION ALL SELECT '12', 'libeay32.dll', 'libeay32.dll'
       UNION ALL SELECT '13', 'louvorja_slja.ico', 'config\ico\louvorja_slja.ico'
