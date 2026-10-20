@@ -199,7 +199,7 @@ test('gera os objetos Delphi, os campos essenciais e um banco por idioma', (cont
   ])
   assert.equal(
     db.prepare('SELECT count(*) total FROM ARQUIVOS_ADICIONAIS WHERE TAMANHO = 0').get()?.total,
-    16,
+    15,
   )
   assert.deepEqual(names(db, 'ALBUM'), ['ID', 'NOME', 'IMAGEM', 'PERMITE_DESATIVAR'])
   assert.deepEqual(names(db, 'BIBLIA'), [
@@ -611,7 +611,6 @@ const additionalPaths = [
   'bass.dll',
   'borlndmm.dll',
   'midas.dll',
-  'LouvorJA.exe',
   'ssleay32.dll',
   'libeay32.dll',
   'config/ico/louvorja_slja.ico',
@@ -747,7 +746,7 @@ test('inventário publicado rejeita tamanhos inválidos e inventários conflitan
   assert.throws(() => exportLegacyDatabases(options), /tamanho publicado inválido/)
 })
 
-test('mapeia downloads PT e ES, publica os 16 adicionais e conserva a versão 185', (context) => {
+test('mapeia downloads PT e ES, publica os 15 adicionais e conserva a versão 185', (context) => {
   const root = mkdtempSync(join(tmpdir(), 'louvorja-delphi-downloads-'))
   context.after(() => rmSync(root, { recursive: true, force: true }))
   const exportSql = join(root, 'replica.sql')
@@ -816,7 +815,7 @@ test('mapeia downloads PT e ES, publica os 16 adicionais e conserva a versão 18
       db
         .prepare("SELECT count(*) total FROM ARQUIVOS_SISTEMA WHERE TIPO = 'ARQUIVOS_ADICIONAIS'")
         .get()?.total,
-      16,
+      15,
     )
     for (const record of db.prepare('SELECT URL_DOWNLOAD, TAMANHO FROM ARQUIVOS_SISTEMA').all()) {
       assert.equal(record.TAMANHO, publishedFiles.get(String(record.URL_DOWNLOAD)))

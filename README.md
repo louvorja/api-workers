@@ -123,9 +123,10 @@ banco 185 sem `ARQUIVOS_SISTEMA.URL_DOWNLOAD` devem detectar a coluna ausente
 e baixar novamente o banco uma vez; comparar apenas a versão não detecta
 a mudança. A regeneração usa `--force` sem incrementar a versão.
 
-`ARQUIVOS_ADICIONAIS` contém 16 arquivos: executável, seis DLLs (incluindo
+`ARQUIVOS_ADICIONAIS` contém 15 arquivos: seis DLLs (incluindo
 `bassopus.dll`), fonte, ícone, três áudios da Escola Sabatina e quatro páginas
-HTML de `system/config/server/`. O cron acompanha o último instalador oficial estável e a `main` do Delphi:
+HTML de `system/config/server/`. O executável é atualizado pelo instalador e
+fica fora da lista de downloads do banco. O cron acompanha o último instalador oficial estável e a `main` do Delphi:
 o executável e as dependências vêm do instalador; `bassopus.dll` e as quatro
 páginas HTML vêm de um mesmo commit da `main`. Mudanças nesses arquivos
 regeneram os dois bancos SQLite sem incrementar a versão do catálogo.

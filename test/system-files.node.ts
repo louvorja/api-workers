@@ -319,7 +319,7 @@ test('recusa allowlist, bytes e manifesto inválidos antes de qualquer escrita',
   assert.deepEqual(storage.writes, [])
 })
 
-test('allowlist mantém os IDs e os caminhos dos 16 adicionais gerados nos dois bancos Delphi', (context) => {
+test('allowlist mantém os 15 adicionais e exclui o executável dos bancos Delphi', (context) => {
   const root = mkdtempSync(join(tmpdir(), 'louvorja-system-list-'))
   context.after(() => rmSync(root, { recursive: true, force: true }))
   const exportSql = join(root, 'replica.sql')
@@ -345,7 +345,19 @@ test('allowlist mantém os IDs e os caminhos dos 16 adicionais gerados nos dois 
         .all()
       assert.deepEqual(
         rows.map((row) => [row.ID, row.URL_DOWNLOAD]),
-        SYSTEM_FILES.map((file) => [file.id, `system/${file.path}`]),
+        SYSTEM_FILES.filter((file) => file.path !== 'LouvorJA.exe').map((file) => [
+          file.id,
+          `system/${file.path}`,
+        ]),
+      )
+      assert.equal(rows.length, 15)
+      assert.equal(
+        db
+          .prepare(
+            "SELECT count(*) total FROM ARQUIVOS_SISTEMA WHERE URL_DOWNLOAD = 'system/LouvorJA.exe'",
+          )
+          .get()?.total,
+        0,
       )
       assert.equal(db.prepare('SELECT VERSAO_BD FROM VERSAO').get()!.VERSAO_BD, 185)
     } finally {
