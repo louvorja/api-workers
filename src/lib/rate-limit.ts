@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from 'hono'
 import type { App, Bindings } from '../types.ts'
-import { countHit } from './window-counter.ts'
+import { isBibleOutcome } from './bible-abuse.ts'
+import { type CounterResult, countHit, recordBibleResult } from './window-counter.ts'
 
 export type RateLimitBucket = 'files' | 'metadata' | 'general' | 'bible'
 
@@ -50,13 +51,16 @@ function limiter(env: Bindings, binding: RateLimitBinding): RateLimit {
   return env[binding]
 }
 
-async function withinLimit(c: Parameters<MiddlewareHandler<App>>[0], policy: RateLimitPolicy) {
+async function withinLimit(
+  c: Parameters<MiddlewareHandler<App>>[0],
+  policy: RateLimitPolicy,
+): Promise<CounterResult> {
   const actor = c.req.header('CF-Connecting-IP') ?? 'unknown-client'
   if (policy.binding === null) {
     const limit = Number(c.env.BIBLE_LIMIT_PER_MINUTE ?? policy.limit) || policy.limit
-    return (await countHit(c.env.BIBLE_LIMITER, actor, limit, policy.period)).allowed
+    return countHit(c.env.BIBLE_LIMITER, actor, limit, policy.period)
   }
-  return (await limiter(c.env, policy.binding).limit({ key: actor })).success
+  return { allowed: (await limiter(c.env, policy.binding).limit({ key: actor })).success, count: 0 }
 }
 
 /**
@@ -70,39 +74,54 @@ export const applyRateLimit: MiddlewareHandler<App> = async (c, next) => {
   }
 
   const policy = rateLimitPolicy(c.req.path)
-  const success = await withinLimit(c, policy)
-  const describe = () => {
+  const decision = await withinLimit(c, policy)
+  const retryAfter = decision.retryAfter ?? policy.period
+  const describe = (resetSeconds: number = policy.period) => {
     c.header('X-RateLimit-Limit', String(policy.limit))
-    c.header('X-RateLimit-Reset', String(Math.floor(Date.now() / 1000) + policy.period))
+    c.header('X-RateLimit-Reset', String(Math.floor(Date.now() / 1000) + resetSeconds))
     c.header('X-RateLimit-Bucket', policy.bucket)
   }
 
-  if (!success) {
+  if (!decision.allowed) {
     // Quem varre capítulo por capítulo espera cada resposta antes do próximo
     // pedido; segurar o 429 desacelera esse robô, e recusar na hora não.
-    if (policy.bucket === 'bible') {
+    if (policy.bucket === 'bible' && !decision.reason) {
       const wait = Number(c.env.BIBLE_THROTTLE_MS ?? 0)
       if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait))
     }
-    describe()
+    describe(retryAfter)
+    if (decision.reason) c.header('X-RateLimit-Reason', decision.reason)
     c.header('X-RateLimit-Remaining', '0')
-    c.header('Retry-After', String(policy.period))
+    c.header('Retry-After', String(retryAfter))
     c.header('Cache-Control', 'no-store')
     return c.json(
       {
         error: 'Too Many Requests',
-        message:
-          policy.bucket === 'bible'
+        message: decision.reason
+          ? 'Consultas repetidas a capítulos inexistentes. Acesso a capítulos temporariamente suspenso; use /db/bible-bundle.'
+          : policy.bucket === 'bible'
             ? 'Limite de capítulos excedido. Para a Bíblia inteira use /db/bible-bundle, um arquivo só.'
             : 'Limite de requisicoes excedido. Tente novamente em breve.',
-        retry_after: policy.period,
+        retry_after: retryAfter,
         bucket: policy.bucket,
+        ...(decision.reason ? { reason: decision.reason } : {}),
       },
       429,
     )
   }
 
   await next()
+  if (
+    policy.bucket === 'bible' &&
+    (c.req.method === 'GET' || c.req.method === 'HEAD') &&
+    isBibleOutcome(c.res.status)
+  ) {
+    await recordBibleResult(
+      c.env.BIBLE_LIMITER,
+      c.req.header('CF-Connecting-IP') ?? 'unknown-client',
+      c.res.status,
+    )
+  }
   // Só depois do handler: várias rotas devolvem um Response montado à mão, e o
   // que foi posto no contexto antes dele não chega à resposta.
   describe()

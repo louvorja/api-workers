@@ -444,12 +444,30 @@ Bindings declarados em `wrangler.jsonc`:
   Se o objeto não responder, a rota segue sem limite; Passado o limite, o 429 é segurado por
   8 s para frear robô sequencial e aponta para `/db/bible-bundle`. Recusar dentro do
   Worker não poupa a cota diária (o pedido já foi contado): a proteção da cota é a
-  regra de WAF da zona. Pedidos paralelos simultâneos podem passar juntos;
+  regra de WAF da zona;
 - `JWT_SECRET` (obrigatório): assinatura das sessões do painel;
 - `GITHUB_TASK_TOKEN` (opcional): token restrito a Actions para `/tasks`. Sem
   ele, `/tasks` responde `503` e o resto funciona;
 - `FTP_COMPAT_CONFIG` (opcional): JSON com o servidor de FTP entregue ao Delphi,
   por idioma — `{"pt": {"host", "port", "root", "username", "password"}, "es": {…}}`.
+
+Além do teto de 150/min, capítulos avulsos têm uma janela móvel de cinco minutos
+(agregada por segundo): 50 respostas 404, quando representam pelo menos 90% dos
+resultados 200/206/304/404, suspendem esse IP por 30 minutos. Uma reincidência em
+24 horas aumenta a suspensão para duas horas. Apenas GET/HEAD de capítulos entram
+nessa conta; preflight, bundles, demais rotas e erros de infraestrutura ficam fora.
+O histórico e a suspensão ficam no armazenamento do Durable Object, sobrevivem a
+reinícios e são apagados por alarme depois de vencerem. Durante a suspensão, a API
+responde 429 antes de consultar R2, com `Retry-After` e
+`X-RateLimit-Reason: invalid-bible-queries`, sem a espera de 8 s do teto por minuto.
+Os critérios ficam em `src/lib/bible-abuse.ts`.
+
+A regra WAF `API - bloquear caminhos de scanner` está registrada em
+`config/waf-api-scanners.json` e é administrada separadamente no painel da
+Cloudflare (o `wrangler deploy` não a cria). Ela bloqueia caminhos de arquivos
+sensíveis e sondagens de WordPress exclusivamente em `api.louvorja.com.br`, antes
+do Worker. Não cobre `api.louvorja.workers.dev`, que continua ativo para os apps;
+a suspensão interna funciona nos dois endereços.
 
 Os jobs usam `CLOUDFLARE_API_TOKEN`, credenciais S3 do R2 e, no job mensal,
 `YOUTUBE_API_KEY`. Segredos não entram em `wrangler.jsonc`, no R2 ou no Git.

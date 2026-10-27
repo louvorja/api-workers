@@ -1,0 +1,7 @@
+{
+  "id": "027cf2a60f9d4c949f89cbf9b14964d7",
+  "description": "API - bloquear caminhos de scanner",
+  "action": "block",
+  "enabled": true,
+  "expression": "(http.host eq \"api.louvorja.com.br\" and (ends_with(lower(http.request.uri.path), \"/.env\") or lower(http.request.uri.path) contains \"/.env.\" or lower(http.request.uri.path) contains \"/.env/\" or ends_with(lower(http.request.uri.path), \"/.git\") or lower(http.request.uri.path) contains \"/.git/\" or ends_with(lower(http.request.uri.path), \"/.svn\") or lower(http.request.uri.path) contains \"/.svn/\" or ends_with(lower(http.request.uri.path), \"/.ssh\") or lower(http.request.uri.path) contains \"/.ssh/\" or lower(http.request.uri.path) in {\"/wp-login.php\" \"/xmlrpc.php\" \"/wp-config.php\" \"/wp-admin\"} or starts_with(lower(http.request.uri.path), \"/wp-admin/\")))"
+}

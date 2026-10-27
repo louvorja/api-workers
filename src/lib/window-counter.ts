@@ -1,4 +1,14 @@
 import { DurableObject } from 'cloudflare:workers'
+import { type BibleAbuseState, bibleRetryAfter, recordBibleOutcome } from './bible-abuse.ts'
+
+const ABUSE_KEY = 'bible-abuse-v1'
+
+export type CounterResult = {
+  allowed: boolean
+  count: number
+  retryAfter?: number
+  reason?: 'invalid-bible-queries'
+}
 
 /**
  * Contador de janela fixa, um Durable Object por chave (IP).
@@ -14,7 +24,12 @@ export class WindowCounter extends DurableObject {
   private windowId = 0
   private count = 0
 
-  async hit(limit: number, windowSeconds: number): Promise<{ allowed: boolean; count: number }> {
+  async hit(limit: number, windowSeconds: number): Promise<CounterResult> {
+    const abuse = await this.ctx.storage.get<BibleAbuseState>(ABUSE_KEY)
+    const retryAfter = bibleRetryAfter(abuse, Date.now())
+    if (retryAfter > 0) {
+      return { allowed: false, count: this.count, retryAfter, reason: 'invalid-bible-queries' }
+    }
     const id = Math.floor(Date.now() / (windowSeconds * 1000))
     if (id !== this.windowId) {
       this.windowId = id
@@ -24,6 +39,26 @@ export class WindowCounter extends DurableObject {
     this.count += 1
     return { allowed: true, count: this.count }
   }
+
+  async recordResult(status: number): Promise<void> {
+    const previous = await this.ctx.storage.get<BibleAbuseState>(ABUSE_KEY)
+    const state = recordBibleOutcome(previous, status, Date.now())
+    if (!state || state === previous) return
+    await this.ctx.storage.put(ABUSE_KEY, state)
+    await this.ctx.storage.setAlarm(state.expiresAt)
+    if (state.blockedUntil > (previous?.blockedUntil ?? 0)) {
+      console.warn('bible_invalid_queries_suspended', {
+        retry_after: bibleRetryAfter(state, Date.now()),
+      })
+    }
+  }
+
+  async alarm(): Promise<void> {
+    const state = await this.ctx.storage.get<BibleAbuseState>(ABUSE_KEY)
+    if (!state) return
+    if (state.expiresAt <= Date.now()) await this.ctx.storage.delete(ABUSE_KEY)
+    else await this.ctx.storage.setAlarm(state.expiresAt)
+  }
 }
 
 /** Falha aberta: se o objeto durável não responder, a rota segue sem limite. */
@@ -32,12 +67,24 @@ export async function countHit(
   key: string,
   limit: number,
   windowSeconds = 60,
-): Promise<{ allowed: boolean; count: number }> {
+): Promise<CounterResult> {
   try {
     const stub = namespace.get(namespace.idFromName(key))
     return await stub.hit(limit, windowSeconds)
   } catch (reason) {
     console.error('window_counter_failed', reason)
     return { allowed: true, count: 0 }
+  }
+}
+
+export async function recordBibleResult(
+  namespace: DurableObjectNamespace<WindowCounter>,
+  key: string,
+  status: number,
+): Promise<void> {
+  try {
+    await namespace.get(namespace.idFromName(key)).recordResult(status)
+  } catch (reason) {
+    console.error('bible_outcome_counter_failed', reason)
   }
 }

@@ -16,7 +16,8 @@ export const COMMON_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
   'Access-Control-Allow-Headers':
     'Content-Type, Authorization, X-Requested-With, Api-Token, Range, If-Range, If-Match, If-None-Match, If-Modified-Since, If-Unmodified-Since',
-  'Access-Control-Expose-Headers': 'ETag, Content-Range, Accept-Ranges, Content-Disposition',
+  'Access-Control-Expose-Headers':
+    'ETag, Content-Range, Accept-Ranges, Content-Disposition, Retry-After, X-RateLimit-Reason',
   'Access-Control-Max-Age': '86400',
 }
 
