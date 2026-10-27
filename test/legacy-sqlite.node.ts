@@ -573,6 +573,74 @@ test('listas vazias também declaram os tipos para o Classic', (context) => {
   }
 })
 
+test('livros da Bíblia e álbuns chegam como string ao Classic, também com a Bíblia preservada', (context) => {
+  const root = mkdtempSync(join(tmpdir(), 'louvorja-classic-bible-'))
+  context.after(() => rmSync(root, { recursive: true, force: true }))
+  const outDir = join(root, 'out')
+  const original = new DatabaseSync(':memory:')
+  context.after(() => original.close())
+  original.exec(fixtureSql())
+
+  const fromD1 = exportLegacyDatabases({ exportSql: writeExport(root, 'with-bible.sql'), outDir })
+  const preserved = exportLegacyDatabases({
+    exportSql: writeExport(root, 'without-bible.sql', false),
+    outDir,
+    audio: 'stored',
+    materializeMusicLists: true,
+  })
+  for (const result of [...fromD1, ...preserved]) {
+    const db = new DatabaseSync(result.path, { readOnly: true })
+    const declared = (sql: string, column: string) =>
+      db
+        .prepare(sql)
+        .columns()
+        .find((field) => field.name === column)?.type ?? ''
+    // Consultas da tela da Bíblia, das grades de álbuns e da lista de álbuns da letra.
+    for (const column of ['LIVRO', 'SIGLA', 'PALAVRACHAVE']) {
+      assert.match(declared('SELECT * FROM LIVRO ORDER BY ID', column), /^NVARCHAR\(\d+\)$/)
+    }
+    assert.match(
+      declared(
+        "SELECT * FROM ALBUM WHERE PERMITE_DESATIVAR = 'S' AND ID NOT IN (SELECT ID FROM _ALBUM_IGNORAR) ORDER BY NOME",
+        'NOME',
+      ),
+      /^NVARCHAR\(\d+\)$/,
+    )
+    assert.match(
+      declared(
+        'SELECT A.ID,A.NOME FROM ALBUM_MUSICAS AM LEFT JOIN ALBUM A ON (A.ID = AM.ID_ALBUM) WHERE AM.ID_MUSICA = 1 ORDER BY A.NOME',
+        'NOME',
+      ),
+      /^NVARCHAR\(\d+\)$/,
+    )
+    assert.deepEqual(
+      { ...db.prepare('SELECT LIVRO, SIGLA, PALAVRACHAVE FROM LIVRO').get() },
+      result.language === 'pt'
+        ? { LIVRO: 'Gênesis', SIGLA: 'Gn', PALAVRACHAVE: 'genesis' }
+        : { LIVRO: 'Génesis', SIGLA: 'Gn', PALAVRACHAVE: 'genesis' },
+    )
+    for (const table of ['albums', 'bible_book']) {
+      assert.deepEqual(
+        db.prepare(`SELECT * FROM ${table} ORDER BY 1`).all(),
+        original
+          .prepare(`SELECT * FROM ${table} WHERE id_language = ? ORDER BY 1`)
+          .all(result.language),
+      )
+      assert.deepEqual(
+        db.prepare(`PRAGMA index_list(${table})`).all(),
+        original.prepare(`PRAGMA index_list(${table})`).all(),
+      )
+    }
+    assert.equal(db.prepare('PRAGMA integrity_check').get()?.integrity_check, 'ok')
+    db.close()
+  }
+  assert.equal(
+    original.prepare("SELECT type FROM pragma_table_info('bible_book') WHERE name = 'name'").get()
+      ?.type,
+    'TEXT',
+  )
+})
+
 test('modo legacy grava no SQLite o tamanho real do MP3 materializado', (context) => {
   const root = mkdtempSync(join(tmpdir(), 'louvorja-legacy-size-'))
   context.after(() => rmSync(root, { recursive: true, force: true }))

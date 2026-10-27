@@ -469,41 +469,67 @@ function dropD1OnlyObjects(db: DatabaseSync) {
   }
 }
 
-/** Preserva MUSICAS como view, mas fornece ao FireDAC um nome de tipo string na origem. */
-function typeMusicName(db: DatabaseSync) {
+/**
+ * Referência direta de coluna numa view herda o tipo declarado na tabela, e o
+ * FireDAC lê TEXT como WideMemo, que os controles de tela exibem como
+ * "(WIDEMEMO)". Por isso as colunas abaixo saem tipadas no banco exportado.
+ */
+const DISPLAY_TEXT_COLUMNS = {
+  // MUSICAS.NOME
+  musics: ['name'],
+  // ALBUM.NOME
+  albums: ['name'],
+  // LIVRO.LIVRO, LIVRO.SIGLA e LIVRO.PALAVRACHAVE
+  bible_book: ['name', 'abbreviation', 'keywords'],
+} as const
+
+/** Preserva as views, mas fornece ao FireDAC um nome de tipo string na origem. */
+function typeDisplayColumns(db: DatabaseSync, table: string, names: readonly string[]) {
   const original = String(
-    row(db, "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'musics'")?.sql ?? '',
+    row(db, "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", table)?.sql ?? '',
   )
-  // O comprimento em bytes cobre também strings Unicode no buffer UTF-16 do Classic.
-  const size = Math.max(
-    512,
-    Number(row(db, 'SELECT max(length(CAST(name AS BLOB))) AS size FROM musics')?.size ?? 0),
-  )
-  const typed = original.replace(
-    /([,(]\s*(?:"name"|`name`|\[name\]|name)\s+)TEXT\b/i,
-    `$1NVARCHAR(${size})`,
-  )
-  if (typed === original) throw new Error('musics.name não corresponde ao schema TEXT do D1')
+  let typed = original
+  for (const name of names) {
+    // O comprimento em bytes cobre também strings Unicode no buffer UTF-16 do Classic.
+    const size = Math.max(
+      512,
+      Number(
+        row(
+          db,
+          `SELECT max(length(CAST(${quoteIdentifier(name)} AS BLOB))) AS size ` +
+            `FROM ${quoteIdentifier(table)}`,
+        )?.size ?? 0,
+      ),
+    )
+    const next = typed.replace(
+      new RegExp(`([,(]\\s*(?:"${name}"|\`${name}\`|\\[${name}\\]|${name})\\s+)TEXT\\b`, 'i'),
+      `$1NVARCHAR(${size})`,
+    )
+    if (next === typed) throw new Error(`${table}.${name} não corresponde ao schema TEXT do D1`)
+    typed = next
+  }
 
   const indexes = db
     .prepare(
-      "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'musics' AND sql IS NOT NULL",
+      "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL",
     )
-    .all()
-  const sequence = row(db, "SELECT seq FROM sqlite_sequence WHERE name = 'musics'")?.seq ?? 0
+    .all(table)
+  const sequence = row(db, 'SELECT seq FROM sqlite_sequence WHERE name = ?', table)?.seq ?? 0
+  const quoted = quoteIdentifier(table)
   // Só no banco temporário da exportação, com FKs desligadas e dentro da transação.
   // Reusa o DDL para preservar colunas, constraints e AUTOINCREMENT; não renomeia
   // a tabela original, pois isso reescreveria as referências de outras tabelas.
   db.exec(`
-    CREATE TEMP TABLE delphi_music_names AS SELECT * FROM musics;
-    DROP TABLE musics;
+    CREATE TEMP TABLE delphi_typed_rows AS SELECT * FROM ${quoted};
+    DROP TABLE ${quoted};
     ${typed};
-    INSERT INTO musics SELECT * FROM temp.delphi_music_names;
-    DROP TABLE temp.delphi_music_names;
+    INSERT INTO ${quoted} SELECT * FROM temp.delphi_typed_rows;
+    DROP TABLE temp.delphi_typed_rows;
   `)
   for (const index of indexes) db.exec(String(index.sql))
-  db.prepare("UPDATE sqlite_sequence SET seq = max(seq, ?) WHERE name = 'musics'").run(
+  db.prepare('UPDATE sqlite_sequence SET seq = max(seq, ?) WHERE name = ?').run(
     sequence as SQLInputValue,
+    table,
   )
 }
 
@@ -1037,7 +1063,9 @@ function buildLanguageDatabase(
     }
 
     dropD1OnlyObjects(db)
-    typeMusicName(db)
+    for (const [table, names] of Object.entries(DISPLAY_TEXT_COLUMNS)) {
+      typeDisplayColumns(db, table, names)
+    }
     createLegacyObjects(db, language, version, audio)
     if (materializeSearch) materializeMusicLists(db)
     validateDownloads(db, publishedFiles)

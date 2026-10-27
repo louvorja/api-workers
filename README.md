@@ -113,8 +113,11 @@ atualiza canais, playlists e vídeos. O exportador mantém as views por padrão;
 com tipos explícitos: nomes e outros campos de exibição usam `NVARCHAR(n)`,
 que o FireDAC reconhece como string; letras usam `TEXT` (memo), e IDs de vídeos
 permanecem textuais. O tamanho declarado acomoda os valores exportados.
-O gerador também tipa `musics.name` no SQLite exportado para que `MUSICAS.NOME`,
-usado pela tela de álbuns, seja string. O esquema do D1 permanece igual.
+O gerador também tipa `musics.name`, `albums.name` e `bible_book.name`,
+`abbreviation` e `keywords` no SQLite exportado. As views repassam o tipo
+declarado, então `MUSICAS.NOME`, `ALBUM.NOME` e `LIVRO.LIVRO` chegam como
+string, e não como memo, que a tela mostraria como `(WIDEMEMO)`. O esquema do
+D1 permanece igual.
 Para regenerar na mesma versão, use `--force`; clientes que já baixaram essa
 versão precisam baixar o banco novamente para receber a mudança.
 
