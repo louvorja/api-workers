@@ -64,7 +64,8 @@ rest.get('/version', async (c) => {
     api_version: '1.0.0',
     min_client_version: '1.0.0',
     runtime: 'Cloudflare Workers',
-    db_version: params.db_version ?? null,
+    // O `db_version` de /params ficou no número do banco do FTP, desligado.
+    db_version: params.https_db_version ?? null,
   })
 })
 

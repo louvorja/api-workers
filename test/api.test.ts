@@ -285,6 +285,21 @@ describe('params', () => {
     expect(body.db_version).toBe(185)
     expect(typeof body.db_version).toBe('number')
   })
+
+  it('mostra na raiz e em /version a versão do banco por HTTPS, não a do FTP', async () => {
+    await env.FILES.put(
+      'meta/params.json',
+      JSON.stringify({ db_version: 185, https_db_version: 186, help: 'x' }),
+    )
+    try {
+      for (const path of ['/', '/version']) {
+        const body = (await (await call(path)).json()) as Record<string, unknown>
+        expect(body.db_version, path).toBe(186)
+      }
+    } finally {
+      await env.FILES.put('meta/params.json', JSON.stringify({ db_version: '185', help: 'x' }))
+    }
+  })
 })
 
 describe('cabeçalhos', () => {

@@ -64,7 +64,8 @@ app.get('/', async (c) => {
       '/db/catalog-bundle': 'ZIP com o catálogo sem capítulos bíblicos, para a instalação inicial.',
       '/db/bundle': 'ZIP com todas as tabelas do catálogo (álbuns, músicas, hinário e Bíblia).',
     },
-    db_version: current.db_version ?? null,
+    // O `db_version` de /params ficou no número do banco do FTP, desligado.
+    db_version: current.https_db_version ?? null,
   })
 })
 
