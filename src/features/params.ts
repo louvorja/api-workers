@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { COMMON_HEADERS, notFound } from '../lib/http.ts'
 import type { App } from '../types.ts'
-import { FTP_HANDSHAKE_ORIGIN, ftpEnabled, ftpHandshakeUrl } from './ftp.ts'
+import { FTP_HANDSHAKE_ORIGIN } from './ftp.ts'
 
 /**
  * O instalador Delphi consome INI; o app Electron consome JSON. Mesmo conteúdo.
@@ -34,11 +34,9 @@ params.on(['GET', 'HEAD'], '/params', async (c) => {
       data[key] = FTP_HANDSHAKE_ORIGIN + value.slice(WORKERS_DEV_ORIGIN.length)
     }
   }
-  // O Delphi só inicia a atualização se receber o endereço do aperto de mão do
-  // FTP. A chave só existe enquanto houver um servidor de FTP configurado.
-  if (ftpEnabled(c.env)) {
-    data.conn_ftp = await ftpHandshakeUrl(FTP_HANDSHAKE_ORIGIN, c.env.JWT_SECRET)
-  }
+  // Sem `conn_ftp`, o Delphi anterior à 27.0 recusa o download com um erro
+  // genérico; com ele, recebe de /ftp o aviso de que o FTP acabou.
+  data.conn_ftp = `${FTP_HANDSHAKE_ORIGIN}/ftp`
   const headers = new Headers(COMMON_HEADERS)
   headers.set('Cache-Control', PARAMS_CACHE)
 

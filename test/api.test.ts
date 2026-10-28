@@ -262,7 +262,11 @@ describe('file', () => {
 describe('params', () => {
   it('devolve JSON por padrão', async () => {
     const res = await call('/params')
-    expect(await res.json()).toEqual({ db_version: '185', help: 'x' })
+    expect(await res.json()).toEqual({
+      db_version: '185',
+      help: 'x',
+      conn_ftp: 'https://api.louvorja.com.br/ftp',
+    })
     expect(res.headers.get('cache-control')).toBe(
       'public, max-age=3600, stale-while-revalidate=86400',
     )
@@ -270,7 +274,9 @@ describe('params', () => {
 
   it('devolve INI com CRLF, como o parser Delphi espera', async () => {
     const res = await call('/params?type=env')
-    expect(await res.text()).toBe('db_version=185\r\nhelp=x\r\n')
+    expect(await res.text()).toBe(
+      'db_version=185\r\nhelp=x\r\nconn_ftp=https://api.louvorja.com.br/ftp\r\n',
+    )
   })
 
   it('preserva o tipo dos valores no JSON', async () => {
@@ -443,15 +449,6 @@ describe('REST', () => {
       'public, max-age=3600, stale-while-revalidate=86400',
     )
     expect(await cacheOf('/params')).toBe('public, max-age=3600, stale-while-revalidate=86400')
-  })
-
-  it('avisa que o FTP foi descontinuado em vez de sumir com a rota', async () => {
-    for (const path of ['/ftp', '/pt/ftp']) {
-      const res = await call(path)
-      expect(res.status).toBe(410)
-      expect(res.headers.get('cache-control')).toBe('no-store')
-      expect(((await res.json()) as { error: string }).error).toBe('FTP descontinuado')
-    }
   })
 })
 

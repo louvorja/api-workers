@@ -209,7 +209,7 @@ export const openapi = {
         tags: ['Sistema'],
         summary: 'Parâmetros da aplicação',
         description:
-          'JSON por padrão; `?type=env` devolve INI com CRLF. `conn_ftp` aparece enquanto houver um servidor de FTP configurado.',
+          'JSON por padrão; `?type=env` devolve INI com CRLF. `conn_ftp` aponta para `/ftp`, que avisa as versões antigas do Delphi de que o FTP acabou.',
         parameters: [
           {
             name: 'type',
@@ -261,9 +261,8 @@ export const openapi = {
         tags: ['Sistema'],
         summary: 'Aperto de mão do FTP (Delphi)',
         description:
-          'Valida o token de `conn_ftp` e devolve, em Base64, o INI com host, porta, raiz e credenciais do servidor de FTP. Sem servidor configurado responde `410`.',
+          'O FTP foi desligado. Devolve, em Base64, o INI `ftp_msg=...`, que o Delphi anterior à 27.0 mostra ao usuário no lugar do download.',
         parameters: [
-          { name: 'token', in: 'query', required: true, schema: { type: 'string' } },
           { name: 'data', in: 'query', required: false, schema: { type: 'string' } },
           {
             name: 'lang',
@@ -273,9 +272,7 @@ export const openapi = {
           },
         ],
         responses: {
-          200: { description: 'INI da conexão, codificado em Base64.' },
-          401: { description: 'Token inválido ou vencido.' },
-          410: { description: 'FTP desligado.' },
+          200: { description: 'INI com `ftp_msg`, codificado em Base64.' },
         },
       },
     },

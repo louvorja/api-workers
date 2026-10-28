@@ -67,14 +67,15 @@ dele ("Indy Library", erro 1010), e isso não é configurável. Por isso `/param
 sempre entrega com o domínio antigo os endereços desta API (`conn_ftp`,
 `coletaneas_online`, `version_log`).
 
-**Atualização por FTP (versões anteriores do programa).** Workers não recebe
-conexões FTP. O Worker só faz o aperto de mão HTTPS: `/params` anuncia
-`conn_ftp` e `/ftp` devolve host, porta e credenciais de um servidor de FTP
-que existe à parte (o do servidor antigo), lidos do secret
-`FTP_COMPAT_CONFIG`. O que está naquele FTP não é gerado aqui: o banco de lá
-parou na versão em que o PHP o deixou, e `db_version` em `/params` fica nesse
-número para essas instalações não tentarem atualizar a cada abertura. Sem o
-secret, `/params` não anuncia `conn_ftp` e `/ftp` responde `410`.
+**FTP desligado (versões anteriores à 27.0).** Essas versões baixam banco e
+mídias só por FTP, a partir de um aperto de mão HTTPS: `/params` anuncia
+`conn_ftp` e o programa pede a `/ftp` os dados do servidor. O FTP foi
+desligado; `/ftp` responde com `ftp_msg`, que o programa mostra no lugar do
+download, mandando instalar a versão nova pelo site. Sem `conn_ftp` o Delphi
+recusaria o download com um erro genérico. A atualização do programa em si
+(v25.0 em diante) não usa FTP: vem de `pt_download`/`es_download`, no GitHub.
+`db_version` fica no número em que o PHP deixou o banco do FTP, para essas
+instalações não tentarem atualizar a cada abertura.
 
 **Atualização por HTTPS, com suporte a Opus.** Os arquivos públicos ficam em
 `files.louvorja.com.br` (bucket `files`), e `/params` diz onde:
@@ -188,8 +189,8 @@ e na resposta de capítulo inexistente.
 `routes`, no `wrangler.jsonc`). O registro de DNS do endereço ainda aponta
 para o servidor PHP, porque as rotas precisam dele, mas nenhum pedido chega lá
 por HTTP: `/auth`, `/admin`, `/tasks` e `/health` desse domínio também são
-os daqui. Quem ainda fala com aquela máquina é só o Delphi, por FTP, direto no
-IP.
+os daqui. O FTP daquela máquina, que o Delphi anterior à 27.0 usava direto no
+IP, não é mais anunciado.
 
 Quem pede `/file/musics/<faixa>.mp3` recebe um redirecionamento para `files`
 somente quando esse MP3 existe lá. A API não entrega Opus com nome de MP3.
@@ -450,9 +451,7 @@ Bindings declarados em `wrangler.jsonc`:
   regra de WAF da zona;
 - `JWT_SECRET` (obrigatório): assinatura das sessões do painel;
 - `GITHUB_TASK_TOKEN` (opcional): token restrito a Actions para `/tasks`. Sem
-  ele, `/tasks` responde `503` e o resto funciona;
-- `FTP_COMPAT_CONFIG` (opcional): JSON com o servidor de FTP entregue ao Delphi,
-  por idioma — `{"pt": {"host", "port", "root", "username", "password"}, "es": {…}}`.
+  ele, `/tasks` responde `503` e o resto funciona.
 
 Além do teto de 150/min, capítulos avulsos têm uma janela móvel de cinco minutos
 (agregada por segundo): 50 respostas 404, quando representam pelo menos 90% dos
